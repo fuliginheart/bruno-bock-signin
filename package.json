@@ -1,0 +1,56 @@
+{
+  "name": "bruno-bock-signin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch --env-file=.env.local server.ts",
+    "build": "next build",
+    "build:kiosk1": "node --env-file=.env.kiosk1 node_modules/next/dist/bin/next build",
+    "build:kiosk2": "node --env-file=.env.kiosk2 node_modules/next/dist/bin/next build",
+    "start": "NODE_ENV=production tsx --env-file=.env.local server.ts",
+    "start:win": "cross-env NODE_ENV=production tsx --env-file=.env.local server.ts",
+    "start:kiosk1": "cross-env NODE_ENV=production tsx --env-file=.env.kiosk1 server.ts",
+    "start:kiosk2": "cross-env NODE_ENV=production tsx --env-file=.env.kiosk2 server.ts",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate --config=drizzle.config.json",
+    "db:migrate": "tsx --env-file=.env.local src/db/migrate.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.2.0",
+    "drizzle-orm": "^0.38.3",
+    "next": "15.5.15",
+    "pino": "^9.6.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-webcam": "^7.2.0",
+    "signature_pad": "^5.0.4",
+    "ulid": "^2.3.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@types/ws": "^8.5.13",
+    "autoprefixer": "^10.4.20",
+    "cross-env": "^7.0.3",
+    "drizzle-kit": "^0.30.1",
+    "eslint": "^9.18.0",
+    "eslint-config-next": "15.5.15",
+    "pino-pretty": "^13.0.0",
+    "postcss": "^8.5.1",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
