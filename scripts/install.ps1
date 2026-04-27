@@ -73,31 +73,92 @@ function Test-Cmd($name) {
   return [bool] (Get-Command $name -ErrorAction SilentlyContinue)
 }
 
-function Install-Prereqs {
-  Write-Step "Installing prerequisites via winget"
-  if (-not (Test-Cmd "winget")) {
-    throw "winget is not available. Install App Installer from the Microsoft Store, then re-run."
-  }
-
-  $packages = @(
-    @{ Id = "OpenJS.NodeJS.LTS"; Cmd = "node" },
-    @{ Id = "Git.Git";           Cmd = "git"  },
-    @{ Id = "NSSM.NSSM";         Cmd = "nssm" }
-  )
-
-  foreach ($p in $packages) {
-    if (Test-Cmd $p.Cmd) {
-      Write-Ok "$($p.Id) already installed."
-      continue
-    }
-    Write-Host "    Installing $($p.Id) ..."
-    & winget install --id $p.Id -e --silent --accept-source-agreements --accept-package-agreements | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "winget install $($p.Id) failed (exit $LASTEXITCODE)." }
-  }
-
-  # Refresh PATH so newly installed tools are visible to this session.
+function Refresh-Path {
   $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
-              [System.Environment]::GetEnvironmentVariable("Path","User")
+              [System.Environment]::GetEnvironmentVariable("Path","User") + ";" +
+              "C:\Program Files\nodejs;" +
+              "C:\Program Files\Git\cmd;" +
+              "C:\Program Files\Git\bin;" +
+              "C:\ProgramData\nssm\win64;" +
+              "$env:APPDATA\npm"
+}
+
+function Install-Nssm {
+  # Try winget first (may fail on some machines — that's OK).
+  if (Test-Cmd "winget") {
+    Write-Host "    Trying winget for NSSM..."
+    & winget install --id NSSM.NSSM -e --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+    Refresh-Path
+    if (Test-Cmd "nssm") { Write-Ok "NSSM installed via winget."; return }
+  }
+
+  # Direct download from nssm.cc (always works, no Store/winget dependency).
+  Write-Host "    Downloading NSSM from nssm.cc..."
+  $zipPath = Join-Path $env:TEMP "nssm-2.24.zip"
+  $zipDir  = Join-Path $env:TEMP "nssm-extract"
+  Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $zipPath -UseBasicParsing
+  if (Test-Path $zipDir) { Remove-Item $zipDir -Recurse -Force }
+  Expand-Archive -Path $zipPath -DestinationPath $zipDir -Force
+
+  # The zip extracts to nssm-2.24\win64\nssm.exe (or win32 on 32-bit)
+  $arch    = if ([Environment]::Is64BitOperatingSystem) { "win64" } else { "win32" }
+  $nssmExe = Get-ChildItem -Path $zipDir -Filter "nssm.exe" -Recurse |
+             Where-Object { $_.FullName -match $arch } |
+             Select-Object -First 1
+  if (-not $nssmExe) {
+    $nssmExe = Get-ChildItem -Path $zipDir -Filter "nssm.exe" -Recurse | Select-Object -First 1
+  }
+  if (-not $nssmExe) { throw "Could not find nssm.exe inside downloaded zip." }
+
+  $dest = "$env:SystemRoot\System32\nssm.exe"
+  Copy-Item $nssmExe.FullName -Destination $dest -Force
+  Remove-Item $zipPath, $zipDir -Recurse -Force -ErrorAction SilentlyContinue
+  Write-Ok "NSSM installed to $dest"
+}
+
+function Install-Prereqs {
+  Write-Step "Installing prerequisites"
+
+  # --- Node.js ---
+  if (Test-Cmd "node") {
+    Write-Ok "Node.js already installed."
+  } else {
+    Write-Host "    Installing Node.js LTS..."
+    if (Test-Cmd "winget") {
+      & winget install --id OpenJS.NodeJS.LTS -e --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+    }
+    Refresh-Path
+    if (-not (Test-Cmd "node")) {
+      throw "Node.js not found after install. Install manually from https://nodejs.org then re-run with -SkipPrereqs."
+    }
+    Write-Ok "Node.js installed."
+  }
+
+  # --- Git ---
+  if (Test-Cmd "git") {
+    Write-Ok "Git already installed."
+  } else {
+    Write-Host "    Installing Git..."
+    if (Test-Cmd "winget") {
+      & winget install --id Git.Git -e --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+    }
+    Refresh-Path
+    if (-not (Test-Cmd "git")) {
+      throw "Git not found after install. Install manually from https://git-scm.com then re-run with -SkipPrereqs."
+    }
+    Write-Ok "Git installed."
+  }
+
+  # --- NSSM ---
+  if (Test-Cmd "nssm") {
+    Write-Ok "NSSM already installed."
+  } else {
+    Install-Nssm
+    Refresh-Path
+    if (-not (Test-Cmd "nssm")) { throw "NSSM not found after install. Please install NSSM manually and re-run." }
+  }
+
+  Refresh-Path
 }
 
 function Stage-App {
