@@ -1,0 +1,27 @@
+{
+  "_comment": "Copy this to kiosk-config.json and fill in your values. Commit kiosk-config.json to the repo — the installer reads it automatically so machines need zero prompts.",
+
+  "adminPinHash": "scrypt$16384$8$1$a8e8be18b7884119e5b0511a70a591f7$4c195187747eb3c0f140fd980098c9f3bb2c83a",
+  "_adminPinHashHint": "Generate with: npx tsx scripts/hash-pin.ts  (paste the output here)",
+
+  "autoLogin": true,
+  "autoLoginUser": "KioskUser",
+  "autoLoginPassword": "Ev200905bb!!",
+
+  "kiosks": [
+    {
+      "id": "lobby",
+      "name": "Lobby Kiosk",
+      "port": 3000,
+      "peers": "http://192.168.200.175:3000",
+      "matchHostname": "KIOSK-LOBBY"
+    },
+    {
+      "id": "dock",
+      "name": "Dock Kiosk",
+      "port": 3000,
+      "peers": "http://192.168.200.176:3000",
+      "matchHostname": "KIOSK-BREAK"
+    }
+  ]
+}

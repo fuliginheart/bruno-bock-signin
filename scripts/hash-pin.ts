@@ -14,7 +14,20 @@ import { hashPin } from "../src/server/pin";
 async function readPin(): Promise<string> {
   const fromArg = process.argv[2];
   if (fromArg && fromArg.length > 0) return fromArg;
-  // Read all of stdin
+
+  // If stdin is a TTY, prompt the user instead of hanging silently.
+  if (process.stdin.isTTY) {
+    const readline = await import("readline");
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    return new Promise((resolve) => {
+      rl.question("Enter PIN: ", (answer) => {
+        rl.close();
+        resolve(answer.trim());
+      });
+    });
+  }
+
+  // Piped input — read all of stdin.
   return new Promise((resolve, reject) => {
     let data = "";
     process.stdin.setEncoding("utf8");
