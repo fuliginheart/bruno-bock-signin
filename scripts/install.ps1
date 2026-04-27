@@ -5,18 +5,22 @@
 .DESCRIPTION
   One-shot installer for a fresh Windows 10/11 machine. Run as Administrator.
 
+  If kiosk-config.json exists in the repo root (or InstallDir), the installer
+  reads all settings from it and runs fully unattended. Otherwise it falls back
+  to interactive prompts.
+
   Steps:
     1. Install prerequisites via winget (Node LTS, Git, NSSM).
     2. Stage the application into the install directory.
     3. npm ci & build.
-    4. Prompt for kiosk identity, peers, admin PIN, paths.
+    4. Read kiosk-config.json (or prompt) for identity/PIN/peers.
     5. Hash the PIN and write .env.local.
     6. Run database migrations.
     7. Install and start the Windows service via NSSM.
     8. Apply Edge kiosk policies (camera auto-allow, autoplay, fullscreen).
     9. Create a Task Scheduler task to launch Edge in --kiosk mode at logon.
    10. Disable sleep / screensaver / display timeout.
-   11. (Optional) Enable Windows auto-login for a dedicated KioskUser.
+   11. Configure Windows auto-login (from config or -EnableAutoLogin flag).
 
 .PARAMETER InstallDir
   Where to place the application files. Default: C:\BrunoBock
@@ -27,21 +31,27 @@
 .PARAMETER SkipPrereqs
   Skip the winget step (use if Node/Git/NSSM are already present).
 
-.PARAMETER NonInteractive
-  Read configuration from environment variables instead of prompting.
-  Required env: KIOSK_ID, KIOSK_NAME, ADMIN_PIN. Optional: PEERS, DB_PATH,
-  MEDIA_PATH, PORT.
+.PARAMETER KioskIndex
+  Which entry in kiosk-config.json kiosks[] to use (0-based). If omitted,
+  the installer matches by machine hostname, then prompts if ambiguous.
+
+.PARAMETER EnableAutoLogin
+  Force auto-login setup even if autoLogin is false in kiosk-config.json.
 
 .EXAMPLE
+  # Fully unattended (kiosk-config.json present):
   Set-ExecutionPolicy -Scope Process Bypass
   .\scripts\install.ps1
+
+  # Specific kiosk from config:
+  .\scripts\install.ps1 -KioskIndex 1
 #>
 [CmdletBinding()]
 param(
   [string] $InstallDir   = "C:\BrunoBock",
   [string] $ServiceName  = "BrunoBockApp",
   [switch] $SkipPrereqs,
-  [switch] $NonInteractive,
+  [int]    $KioskIndex   = -1,
   [switch] $EnableAutoLogin
 )
 
@@ -131,56 +141,126 @@ function Read-SecurePin($prompt) {
   finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 
+function Load-KioskConfig {
+  # Look for kiosk-config.json next to the script (repo root) or in InstallDir.
+  $candidates = @(
+    (Join-Path (Split-Path $PSScriptRoot -Parent) "kiosk-config.json"),
+    (Join-Path $InstallDir "kiosk-config.json")
+  )
+  foreach ($path in $candidates) {
+    if (Test-Path $path) {
+      Write-Ok "Found kiosk-config.json at $path"
+      return (Get-Content $path -Raw | ConvertFrom-Json)
+    }
+  }
+  return $null
+}
+
+function Select-Kiosk($config) {
+  $kiosks = $config.kiosks
+  if (-not $kiosks -or $kiosks.Count -eq 0) { return $null }
+
+  # Explicit index wins.
+  if ($KioskIndex -ge 0) {
+    if ($KioskIndex -ge $kiosks.Count) { throw "-KioskIndex $KioskIndex is out of range (${$kiosks.Count} kiosks defined)." }
+    Write-Ok "Using kiosk index $KioskIndex: $($kiosks[$KioskIndex].name)"
+    return $kiosks[$KioskIndex]
+  }
+
+  # Auto-match by hostname.
+  $hostname = $env:COMPUTERNAME
+  $matched = $kiosks | Where-Object { $_.matchHostname -and ($_.matchHostname -ieq $hostname) }
+  if ($matched -and @($matched).Count -eq 1) {
+    Write-Ok "Auto-matched kiosk by hostname '$hostname': $($matched.name)"
+    return $matched
+  }
+
+  # Only one kiosk defined — use it without asking.
+  if ($kiosks.Count -eq 1) {
+    Write-Ok "Single kiosk defined; using: $($kiosks[0].name)"
+    return $kiosks[0]
+  }
+
+  # Prompt the user to pick.
+  Write-Host "`nMultiple kiosks defined. Which is this machine?" -ForegroundColor Yellow
+  for ($i = 0; $i -lt $kiosks.Count; $i++) {
+    Write-Host "  [$i] $($kiosks[$i].name) (id=$($kiosks[$i].id), port=$($kiosks[$i].port))"
+  }
+  $choice = Read-Host "Enter number"
+  return $kiosks[[int]$choice]
+}
+
 function Get-Config {
   Write-Step "Collecting configuration"
 
-  if ($NonInteractive) {
-    $cfg = @{
-      KioskId   = $env:KIOSK_ID
-      KioskName = $env:KIOSK_NAME
-      Peers     = $env:PEERS
-      AdminPin  = $env:ADMIN_PIN
-      DbPath    = if ($env:DB_PATH)    { $env:DB_PATH }    else { Join-Path $InstallDir "data\db.sqlite" }
-      MediaPath = if ($env:MEDIA_PATH) { $env:MEDIA_PATH } else { Join-Path $InstallDir "data\media" }
-      Port      = if ($env:PORT)       { $env:PORT }       else { "3000" }
+  $config = Load-KioskConfig
+
+  if ($config) {
+    $kiosk = Select-Kiosk $config
+    if (-not $kiosk) { throw "kiosk-config.json has no 'kiosks' array or it is empty." }
+
+    if (-not $config.adminPinHash) {
+      throw "kiosk-config.json is missing 'adminPinHash'. Run: npx tsx scripts/hash-pin.ts and paste the output."
     }
-    if (-not $cfg.KioskId)   { throw "Non-interactive: KIOSK_ID env var is required." }
-    if (-not $cfg.KioskName) { throw "Non-interactive: KIOSK_NAME env var is required." }
-    if (-not $cfg.AdminPin)  { throw "Non-interactive: ADMIN_PIN env var is required." }
-    return $cfg
+
+    return @{
+      KioskId     = $kiosk.id
+      KioskName   = $kiosk.name
+      Peers       = if ($kiosk.peers)  { $kiosk.peers  } else { "" }
+      PinHash     = $config.adminPinHash   # already hashed — skip hash-pin step
+      DbPath      = Join-Path $InstallDir "data\db.sqlite"
+      MediaPath   = Join-Path $InstallDir "data\media"
+      Port        = if ($kiosk.port)   { [string]$kiosk.port } else { "3000" }
+      AutoLogin   = [bool]$config.autoLogin
+      LoginUser   = if ($config.autoLoginUser)     { $config.autoLoginUser }     else { "KioskUser" }
+      LoginPass   = if ($config.autoLoginPassword) { $config.autoLoginPassword } else { "" }
+    }
   }
+
+  # --- Fallback: interactive prompts ---
+  Write-Warn2 "No kiosk-config.json found. Falling back to interactive prompts."
+  Write-Warn2 "Create kiosk-config.json from kiosk-config.example.json to skip this next time."
+  Write-Host ""
 
   $kioskId   = Read-Host "Kiosk ID (short, unique, e.g. K1, lobby, dock-east)"
   if (-not $kioskId) { throw "Kiosk ID is required." }
   $kioskName = Read-Host "Friendly kiosk name (e.g. 'Lobby Kiosk')"
   if (-not $kioskName) { $kioskName = $kioskId }
   $peers     = Read-Host "Peer kiosk URLs, comma-separated (blank if this is the first kiosk)"
-  $dbPath    = Read-Host "SQLite DB path [$(Join-Path $InstallDir 'data\db.sqlite')]"
-  if (-not $dbPath) { $dbPath = Join-Path $InstallDir "data\db.sqlite" }
-  $mediaPath = Read-Host "Media path [$(Join-Path $InstallDir 'data\media')]"
-  if (-not $mediaPath) { $mediaPath = Join-Path $InstallDir "data\media" }
   $port      = Read-Host "HTTP port [3000]"
   if (-not $port) { $port = "3000" }
 
+  $pin = $null
   while ($true) {
     $pin1 = Read-SecurePin "Admin PIN (4-12 digits)"
     if ($pin1.Length -lt 4) { Write-Warn2 "PIN too short."; continue }
     $pin2 = Read-SecurePin "Confirm admin PIN"
     if ($pin1 -ne $pin2) { Write-Warn2 "PINs do not match."; continue }
+    $pin = $pin1
     break
   }
 
   return @{
-    KioskId = $kioskId; KioskName = $kioskName; Peers = $peers
-    AdminPin = $pin1; DbPath = $dbPath; MediaPath = $mediaPath; Port = $port
+    KioskId   = $kioskId; KioskName = $kioskName; Peers = $peers
+    AdminPin  = $pin; PinHash = $null
+    DbPath    = Join-Path $InstallDir "data\db.sqlite"
+    MediaPath = Join-Path $InstallDir "data\media"
+    Port      = $port
+    AutoLogin = $EnableAutoLogin.IsPresent
+    LoginUser = "KioskUser"; LoginPass = ""
   }
 }
 
-function Hash-Pin($pin) {
+function Hash-Pin($cfg) {
+  # If kiosk-config.json already provided a hash, skip this step.
+  if ($cfg.PinHash) {
+    Write-Ok "Using pre-hashed admin PIN from kiosk-config.json."
+    return $cfg.PinHash
+  }
   Write-Step "Hashing admin PIN"
   Push-Location $InstallDir
   try {
-    $hash = $pin | & npx --yes tsx scripts/hash-pin.ts
+    $hash = $cfg.AdminPin | & npx --yes tsx scripts/hash-pin.ts
     if ($LASTEXITCODE -ne 0 -or -not $hash) { throw "hash-pin failed." }
     return $hash.Trim()
   } finally { Pop-Location }
@@ -328,15 +408,23 @@ function Register-BackupTask($cfg) {
   Write-Ok "Scheduled task '$taskName' created."
 }
 
-function Configure-AutoLogin {
-  if (-not $EnableAutoLogin) { return }
-  Write-Step "Configuring auto-login (KioskUser)"
-  $user = Read-Host "Auto-login username (will be created if missing)"
-  $pass = Read-SecurePin "Password for $user"
+function Configure-AutoLogin($cfg) {
+  $doIt = $cfg.AutoLogin -or $EnableAutoLogin
+  if (-not $doIt) { return }
+  Write-Step "Configuring auto-login"
+
+  $user = $cfg.LoginUser
+  $pass = $cfg.LoginPass
+
+  # If password not in config, prompt (only happens in interactive fallback).
+  if (-not $pass) {
+    $pass = Read-SecurePin "Password for auto-login user '$user'"
+  }
+
   if (-not (Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {
     $sec = ConvertTo-SecureString $pass -AsPlainText -Force
     New-LocalUser -Name $user -Password $sec -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
-    Add-LocalGroupMember -Group "Users" -Member $user
+    Add-LocalGroupMember -Group "Users" -Member $user -ErrorAction SilentlyContinue
   }
   $base = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
   Set-ItemProperty -Path $base -Name "AutoAdminLogon" -Value "1"
@@ -368,7 +456,7 @@ if (-not $SkipPrereqs) { Install-Prereqs }
 Stage-App
 Install-Deps
 $cfg     = Get-Config
-$pinHash = Hash-Pin $cfg.AdminPin
+$pinHash = Hash-Pin $cfg
 Write-EnvFile $cfg $pinHash
 Run-Migrations
 Install-Service
@@ -376,5 +464,5 @@ Apply-EdgePolicies
 Register-KioskAutostart $cfg.Port
 Disable-Sleep
 Register-BackupTask $cfg
-Configure-AutoLogin
+Configure-AutoLogin $cfg
 Print-Summary $cfg
