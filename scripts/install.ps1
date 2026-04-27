@@ -162,8 +162,8 @@ function Select-Kiosk($config) {
 
   # Explicit index wins.
   if ($KioskIndex -ge 0) {
-    if ($KioskIndex -ge $kiosks.Count) { throw "-KioskIndex $KioskIndex is out of range (${$kiosks.Count} kiosks defined)." }
-    Write-Ok "Using kiosk index $KioskIndex: $($kiosks[$KioskIndex].name)"
+    if ($KioskIndex -ge $kiosks.Count) { throw "-KioskIndex $KioskIndex is out of range ($($kiosks.Count) kiosks defined)." }
+    Write-Ok "Using kiosk index ${KioskIndex}: $($kiosks[$KioskIndex].name)"
     return $kiosks[$KioskIndex]
   }
 
