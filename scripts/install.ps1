@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Bruno Bock Sign-In Kiosk — automated installer.
+  Bruno Bock Sign-In Kiosk - automated installer.
 
 .DESCRIPTION
   One-shot installer for a fresh Windows 10/11 machine. Run as Administrator.
@@ -84,7 +84,7 @@ function Refresh-Path {
 }
 
 function Install-Nssm {
-  # Try winget first (may fail on some machines — that's OK).
+  # Try winget first (may fail on some machines - that's OK).
   if (Test-Cmd "winget") {
     Write-Host "    Trying winget for NSSM..."
     & winget install --id NSSM.NSSM -e --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
@@ -244,7 +244,7 @@ function Select-Kiosk($config) {
     return $matched
   }
 
-  # Only one kiosk defined — use it without asking.
+  # Only one kiosk defined - use it without asking.
   if ($kiosks.Count -eq 1) {
     Write-Ok "Single kiosk defined; using: $($kiosks[0].name)"
     return $kiosks[0]
@@ -276,7 +276,7 @@ function Get-Config {
       KioskId     = $kiosk.id
       KioskName   = $kiosk.name
       Peers       = if ($kiosk.peers)  { $kiosk.peers  } else { "" }
-      PinHash     = $config.adminPinHash   # already hashed — skip hash-pin step
+      PinHash     = $config.adminPinHash   # already hashed - skip hash-pin step
       DbPath      = Join-Path $InstallDir "data\db.sqlite"
       MediaPath   = Join-Path $InstallDir "data\media"
       Port        = if ($kiosk.port)   { [string]$kiosk.port } else { "3000" }
@@ -431,7 +431,7 @@ function Write-KioskShellScript($port) {
   # Build as an array of lines to avoid here-string indentation issues.
   $lines = @(
     "@echo off",
-    ":: Bruno Bock Kiosk Shell — replaces explorer.exe for the kiosk user.",
+    ":: Bruno Bock Kiosk Shell - replaces explorer.exe for the kiosk user.",
     ":: Waits for the Node service, then loops Edge in kiosk mode (auto-restarts on crash).",
     "",
     ":waitloop",

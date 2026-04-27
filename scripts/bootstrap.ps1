@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Downloads the latest Bruno Bock repo from GitHub, extracts it, and runs
-  install.ps1 — fully unattended when kiosk-config.json is present in the repo.
+  install.ps1 - fully unattended when kiosk-config.json is present in the repo.
 
   Run from an Administrator PowerShell prompt:
 
