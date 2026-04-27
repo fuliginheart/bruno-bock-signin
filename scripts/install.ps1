@@ -424,29 +424,30 @@ function Apply-EdgePolicies {
 function Write-KioskShellScript($port) {
   Write-Step "Writing kiosk shell launcher (kiosk-shell.cmd)"
   $shellPath = Join-Path $InstallDir "kiosk-shell.cmd"
-  $edge32 = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
-  $edge64 = "${env:ProgramFiles}\Microsoft\Edge\Application\msedge.exe"
+  $edge32 = "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
+  $edge64 = "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
+  $url    = "http://localhost:$port"
 
-  $content = @"
-@echo off
-:: Bruno Bock Kiosk Shell - replaces the Windows desktop for the kiosk user.
-:: Waits for the Node service to respond, then loops Edge in kiosk mode so
-:: it automatically restarts if Edge crashes or is closed.
-
-:waitloop
-curl.exe -s http://localhost:$port/api/health >nul 2>&1
-if errorlevel 1 ( timeout /t 3 /nobreak >nul & goto waitloop )
-
-:loop
-if exist "$edge32" (
-  start /wait "" "$edge32" --kiosk http://localhost:$port --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate
-) else (
-  start /wait "" "$edge64" --kiosk http://localhost:$port --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate
-)
-timeout /t 3 /nobreak >nul
-goto loop
-"@
-  Set-Content -Path $shellPath -Value $content -Encoding ASCII
+  # Build as an array of lines to avoid here-string indentation issues.
+  $lines = @(
+    "@echo off",
+    ":: Bruno Bock Kiosk Shell — replaces explorer.exe for the kiosk user.",
+    ":: Waits for the Node service, then loops Edge in kiosk mode (auto-restarts on crash).",
+    "",
+    ":waitloop",
+    "curl.exe -s $url/api/health >nul 2>&1",
+    "if errorlevel 1 ( timeout /t 3 /nobreak >nul & goto waitloop )",
+    "",
+    ":loop",
+    "if exist `"$edge32`" (",
+    "  start /wait `"`" `"$edge32`" --kiosk $url --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate",
+    ") else (",
+    "  start /wait `"`" `"$edge64`" --kiosk $url --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate",
+    ")",
+    "timeout /t 3 /nobreak >nul",
+    "goto loop"
+  )
+  Set-Content -Path $shellPath -Value $lines -Encoding ASCII
   Write-Ok "Wrote $shellPath"
   return $shellPath
 }
@@ -492,9 +493,9 @@ function Configure-KioskShell($user, $pass, $shellPath) {
     Write-Warn2 "User profile not yet created; shell will be applied on first login via RunOnce."
     # RunOnce in HKLM fires once for any user at next logon, then deletes itself.
     $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " +
-           "\"if (\$env:USERNAME -eq '$user') { Set-ItemProperty " +
-           "'HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' " +
-           "-Name Shell -Value '`"$shellPath`"' }\""
+           "`"if (`$env:USERNAME -eq '$user') { Set-ItemProperty " +
+           "'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' " +
+           "-Name Shell -Value '$shellPath' }`""
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" `
         -Name "BrunoBockShell" -Value $cmd
     Write-Ok "RunOnce key set as fallback."
