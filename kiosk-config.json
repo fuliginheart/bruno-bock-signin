@@ -5,7 +5,7 @@
   "_adminPinHashHint": "Generate with: npx tsx scripts/hash-pin.ts  (paste the output here)",
 
   "autoLogin": true,
-  "autoLoginUser": "KioskUser",
+  "autoLoginUser": "BBKioskUser",
   "autoLoginPassword": "Ev200905bb!!",
 
   "kiosks": [

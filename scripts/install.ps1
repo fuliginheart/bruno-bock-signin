@@ -421,28 +421,31 @@ function Apply-EdgePolicies {
   Write-Ok "Edge policies set."
 }
 
-function Write-KioskShellScript($port) {
+function Write-KioskShellScript($port, $kioskUser) {
   Write-Step "Writing kiosk shell launcher (kiosk-shell.cmd)"
   $shellPath = Join-Path $InstallDir "kiosk-shell.cmd"
-  $edge32 = "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
-  $edge64 = "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
-  $url    = "http://localhost:$port"
+  $url = "http://localhost:$port"
 
-  # Build as an array of lines to avoid here-string indentation issues.
+  # Uses %ProgramFiles% so the .cmd file works regardless of where Edge is installed.
+  # Non-kiosk users (e.g. Admin) fall through to explorer.exe normally.
   $lines = @(
     "@echo off",
-    ":: Bruno Bock Kiosk Shell - replaces explorer.exe for the kiosk user.",
-    ":: Waits for the Node service, then loops Edge in kiosk mode (auto-restarts on crash).",
+    ":: Bruno Bock Kiosk Shell",
+    ":: Non-kiosk users fall through to explorer.exe.",
+    "if /i ""%USERNAME%"" neq ""$kioskUser"" (",
+    "  start explorer.exe",
+    "  exit",
+    ")",
     "",
     ":waitloop",
     "curl.exe -s $url/api/health >nul 2>&1",
     "if errorlevel 1 ( timeout /t 3 /nobreak >nul & goto waitloop )",
     "",
     ":loop",
-    "if exist `"$edge32`" (",
-    "  start /wait `"`" `"$edge32`" --kiosk $url --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate",
+    "if exist ""%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"" (",
+    "  start /wait """" ""%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"" --kiosk $url --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate",
     ") else (",
-    "  start /wait `"`" `"$edge64`" --kiosk $url --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate",
+    "  start /wait """" ""%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"" --kiosk $url --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate",
     ")",
     "timeout /t 3 /nobreak >nul",
     "goto loop"
@@ -452,66 +455,27 @@ function Write-KioskShellScript($port) {
   return $shellPath
 }
 
-function Configure-KioskShell($user, $pass, $shellPath) {
-  Write-Step "Setting Windows kiosk shell for user '$user'"
+function Configure-KioskShell($user, $shellPath) {
+  Write-Step "Configuring Windows kiosk shell"
 
-  # Force-create the user profile if it doesn't exist yet by running a
-  # trivial process as that user. Required before we can edit NTUSER.DAT.
-  $ntUserDat = "C:\Users\$user\NTUSER.DAT"
-  if (-not (Test-Path $ntUserDat)) {
-    Write-Host "    Pre-creating user profile..."
-    try {
-      $secPass = ConvertTo-SecureString $pass -AsPlainText -Force
-      $cred    = New-Object System.Management.Automation.PSCredential(".\$user", $secPass)
-      $proc    = Start-Process -FilePath "cmd.exe" -ArgumentList "/c exit" `
-                   -Credential $cred -WindowStyle Hidden -PassThru -ErrorAction Stop
-      $proc.WaitForExit(15000) | Out-Null
-      Start-Sleep -Milliseconds 1500
-    } catch {
-      Write-Warn2 "Could not pre-create profile: $_"
-    }
-  }
+  # Set kiosk-shell.cmd as the system-wide Shell in HKLM.
+  # kiosk-shell.cmd starts explorer.exe for any user that isn't the kiosk user,
+  # so Admin and other accounts continue to work normally.
+  $winlogon = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+  Set-ItemProperty -Path $winlogon -Name "Shell" -Value "`"$shellPath`""
+  Write-Ok "HKLM Shell set to: $shellPath"
 
-  if (Test-Path $ntUserDat) {
-    # Load the user's registry hive, set Shell, then unload.
-    $hive = "HKEY_USERS\BrunoBockTemp"
-    & reg load $hive $ntUserDat | Out-Null
-    Start-Sleep -Milliseconds 500
-    try {
-      & reg add "$hive\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" `
-          /v Shell /t REG_SZ /d "`"$shellPath`"" /f | Out-Null
-      # Disable lock workstation shortcut (Win+L)
-      & reg add "$hive\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" `
-          /v DisableLockWorkstation /t REG_DWORD /d 1 /f | Out-Null
-      Write-Ok "Shell set to kiosk-shell.cmd for '$user'."
-    } finally {
-      [GC]::Collect()
-      Start-Sleep -Milliseconds 500
-      & reg unload $hive | Out-Null
-    }
-  } else {
-    Write-Warn2 "User profile not yet created; shell will be applied on first login via RunOnce."
-    # RunOnce in HKLM fires once for any user at next logon, then deletes itself.
-    $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " +
-           "`"if (`$env:USERNAME -eq '$user') { Set-ItemProperty " +
-           "'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' " +
-           "-Name Shell -Value '$shellPath' }`""
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" `
-        -Name "BrunoBockShell" -Value $cmd
-    Write-Ok "RunOnce key set as fallback."
-  }
-
-  # Hide KioskUser from the Windows sign-in/lock screen (auto-login handles it).
+  # Hide kiosk user from the sign-in screen - auto-login bypasses it anyway.
   $hideKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
   if (-not (Test-Path $hideKey)) { New-Item -Path $hideKey -Force | Out-Null }
   Set-ItemProperty -Path $hideKey -Name $user -Type DWord -Value 0
 
-  # Disable the lock screen machine-wide so it never blocks the kiosk display.
+  # Disable the lock screen so it never blocks the kiosk display.
   $policyKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
   if (-not (Test-Path $policyKey)) { New-Item -Path $policyKey -Force | Out-Null }
   Set-ItemProperty -Path $policyKey -Name "NoLockScreen" -Type DWord -Value 1
 
-  Write-Ok "Kiosk shell setup complete."
+  Write-Ok "Kiosk shell configured."
 }
 
 function Disable-Sleep {
@@ -584,7 +548,7 @@ function Configure-AutoLogin($cfg, $shellPath) {
 
   # Replace the Windows shell (explorer.exe) with the kiosk launcher for this user.
   if ($shellPath) {
-    Configure-KioskShell $user $pass $shellPath
+    Configure-KioskShell $user $shellPath
   }
 }
 
@@ -617,7 +581,7 @@ Build-App
 Run-Migrations
 Install-Service
 Apply-EdgePolicies
-$shellPath = Write-KioskShellScript $cfg.Port
+$shellPath = Write-KioskShellScript $cfg.Port $cfg.LoginUser
 Disable-Sleep
 Register-BackupTask $cfg
 Configure-AutoLogin $cfg $shellPath
