@@ -421,27 +421,96 @@ function Apply-EdgePolicies {
   Write-Ok "Edge policies set."
 }
 
-function Register-KioskAutostart($port) {
-  Write-Step "Registering Edge --kiosk launch at logon"
-  $taskName = "BrunoBockKioskLaunch"
-  $url = "http://localhost:$port"
-  $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
-  if (-not (Test-Path $edge)) {
-    $edge = "${env:ProgramFiles}\Microsoft\Edge\Application\msedge.exe"
+function Write-KioskShellScript($port) {
+  Write-Step "Writing kiosk shell launcher (kiosk-shell.cmd)"
+  $shellPath = Join-Path $InstallDir "kiosk-shell.cmd"
+  $edge32 = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+  $edge64 = "${env:ProgramFiles}\Microsoft\Edge\Application\msedge.exe"
+
+  $content = @"
+@echo off
+:: Bruno Bock Kiosk Shell - replaces the Windows desktop for the kiosk user.
+:: Waits for the Node service to respond, then loops Edge in kiosk mode so
+:: it automatically restarts if Edge crashes or is closed.
+
+:waitloop
+curl.exe -s http://localhost:$port/api/health >nul 2>&1
+if errorlevel 1 ( timeout /t 3 /nobreak >nul & goto waitloop )
+
+:loop
+if exist "$edge32" (
+  start /wait "" "$edge32" --kiosk http://localhost:$port --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate
+) else (
+  start /wait "" "$edge64" --kiosk http://localhost:$port --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen --disable-features=Translate
+)
+timeout /t 3 /nobreak >nul
+goto loop
+"@
+  Set-Content -Path $shellPath -Value $content -Encoding ASCII
+  Write-Ok "Wrote $shellPath"
+  return $shellPath
+}
+
+function Configure-KioskShell($user, $pass, $shellPath) {
+  Write-Step "Setting Windows kiosk shell for user '$user'"
+
+  # Force-create the user profile if it doesn't exist yet by running a
+  # trivial process as that user. Required before we can edit NTUSER.DAT.
+  $ntUserDat = "C:\Users\$user\NTUSER.DAT"
+  if (-not (Test-Path $ntUserDat)) {
+    Write-Host "    Pre-creating user profile..."
+    try {
+      $secPass = ConvertTo-SecureString $pass -AsPlainText -Force
+      $cred    = New-Object System.Management.Automation.PSCredential(".\$user", $secPass)
+      $proc    = Start-Process -FilePath "cmd.exe" -ArgumentList "/c exit" `
+                   -Credential $cred -WindowStyle Hidden -PassThru -ErrorAction Stop
+      $proc.WaitForExit(15000) | Out-Null
+      Start-Sleep -Milliseconds 1500
+    } catch {
+      Write-Warn2 "Could not pre-create profile: $_"
+    }
   }
-  if (-not (Test-Path $edge)) { Write-Warn2 "Edge not found; skipping autostart task."; return }
 
-  $action  = New-ScheduledTaskAction -Execute $edge `
-              -Argument "--kiosk $url --edge-kiosk-type=fullscreen --no-first-run --start-fullscreen"
-  $trigger = New-ScheduledTaskTrigger -AtLogOn
-  $trigger.Delay = "PT5S"
-  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-              -StartWhenAvailable
+  if (Test-Path $ntUserDat) {
+    # Load the user's registry hive, set Shell, then unload.
+    $hive = "HKEY_USERS\BrunoBockTemp"
+    & reg load $hive $ntUserDat | Out-Null
+    Start-Sleep -Milliseconds 500
+    try {
+      & reg add "$hive\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" `
+          /v Shell /t REG_SZ /d "`"$shellPath`"" /f | Out-Null
+      # Disable lock workstation shortcut (Win+L)
+      & reg add "$hive\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" `
+          /v DisableLockWorkstation /t REG_DWORD /d 1 /f | Out-Null
+      Write-Ok "Shell set to kiosk-shell.cmd for '$user'."
+    } finally {
+      [GC]::Collect()
+      Start-Sleep -Milliseconds 500
+      & reg unload $hive | Out-Null
+    }
+  } else {
+    Write-Warn2 "User profile not yet created; shell will be applied on first login via RunOnce."
+    # RunOnce in HKLM fires once for any user at next logon, then deletes itself.
+    $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " +
+           "\"if (\$env:USERNAME -eq '$user') { Set-ItemProperty " +
+           "'HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' " +
+           "-Name Shell -Value '`"$shellPath`"' }\""
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" `
+        -Name "BrunoBockShell" -Value $cmd
+    Write-Ok "RunOnce key set as fallback."
+  }
 
-  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings `
-    -Description "Launch Bruno Bock kiosk in Edge fullscreen at logon." | Out-Null
-  Write-Ok "Scheduled task '$taskName' created."
+  # Hide KioskUser from the Windows sign-in/lock screen (auto-login handles it).
+  $hideKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
+  if (-not (Test-Path $hideKey)) { New-Item -Path $hideKey -Force | Out-Null }
+  Set-ItemProperty -Path $hideKey -Name $user -Type DWord -Value 0
+
+  # Disable the lock screen machine-wide so it never blocks the kiosk display.
+  $policyKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
+  if (-not (Test-Path $policyKey)) { New-Item -Path $policyKey -Force | Out-Null }
+  Set-ItemProperty -Path $policyKey -Name "NoLockScreen" -Type DWord -Value 1
+
+  Write-Ok "Kiosk shell setup complete."
 }
 
 function Disable-Sleep {
@@ -477,10 +546,13 @@ function Register-BackupTask($cfg) {
   Write-Ok "Scheduled task '$taskName' created."
 }
 
-function Configure-AutoLogin($cfg) {
+function Configure-AutoLogin($cfg, $shellPath) {
   $doIt = $cfg.AutoLogin -or $EnableAutoLogin
-  if (-not $doIt) { return }
-  Write-Step "Configuring auto-login"
+  if (-not $doIt) {
+    Write-Warn2 "Auto-login not configured (autoLogin=false in config). Kiosk user and shell NOT set up."
+    return
+  }
+  Write-Step "Configuring auto-login and kiosk user"
 
   $user = $cfg.LoginUser
   $pass = $cfg.LoginPass
@@ -490,16 +562,29 @@ function Configure-AutoLogin($cfg) {
     $pass = Read-SecurePin "Password for auto-login user '$user'"
   }
 
+  # Create the user if it doesn't exist.
   if (-not (Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {
+    Write-Host "    Creating local user '$user'..."
     $sec = ConvertTo-SecureString $pass -AsPlainText -Force
     New-LocalUser -Name $user -Password $sec -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
     Add-LocalGroupMember -Group "Users" -Member $user -ErrorAction SilentlyContinue
+    Write-Ok "User '$user' created."
+  } else {
+    Write-Ok "User '$user' already exists."
   }
+
+  # Set Windows auto-login registry keys.
   $base = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-  Set-ItemProperty -Path $base -Name "AutoAdminLogon" -Value "1"
+  Set-ItemProperty -Path $base -Name "AutoAdminLogon"  -Value "1"
   Set-ItemProperty -Path $base -Name "DefaultUserName" -Value $user
   Set-ItemProperty -Path $base -Name "DefaultPassword" -Value $pass
+  Set-ItemProperty -Path $base -Name "DefaultDomainName" -Value $env:COMPUTERNAME
   Write-Ok "Auto-login enabled for '$user'."
+
+  # Replace the Windows shell (explorer.exe) with the kiosk launcher for this user.
+  if ($shellPath) {
+    Configure-KioskShell $user $pass $shellPath
+  }
 }
 
 function Print-Summary($cfg) {
@@ -531,8 +616,8 @@ Build-App
 Run-Migrations
 Install-Service
 Apply-EdgePolicies
-Register-KioskAutostart $cfg.Port
+$shellPath = Write-KioskShellScript $cfg.Port
 Disable-Sleep
 Register-BackupTask $cfg
-Configure-AutoLogin $cfg
+Configure-AutoLogin $cfg $shellPath
 Print-Summary $cfg
