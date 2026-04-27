@@ -1,134 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-
-// ---------------------------------------------------------------------------
-// SoundUploader — handles one sign-in or sign-out sound setting
-// ---------------------------------------------------------------------------
-function SoundUploader({
-  label,
-  settingKey,
-  initialUrl,
-}: {
-  label: string;
-  settingKey: "sound_sign_in" | "sound_sign_out";
-  initialUrl: string | null;
-}) {
-  const [currentUrl, setCurrentUrl] = useState<string | null>(initialUrl);
-  const [uploading, setUploading] = useState(false);
-  const [removing, setRemoving] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const upload = async (file: File) => {
-    setUploading(true);
-    setMsg(null);
-    try {
-      const fd = new FormData();
-      fd.append("key", settingKey);
-      fd.append("file", file);
-      const res = await fetch("/api/admin/sounds", { method: "POST", body: fd });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-      setCurrentUrl(j.url as string);
-      setMsg({ ok: true, text: "Saved." });
-    } catch (err) {
-      setMsg({ ok: false, text: (err as Error).message });
-    } finally {
-      setUploading(false);
-      if (inputRef.current) inputRef.current.value = "";
-    }
-  };
-
-  const remove = async () => {
-    setRemoving(true);
-    setMsg(null);
-    try {
-      const res = await fetch(
-        `/api/admin/sounds?key=${encodeURIComponent(settingKey)}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error || `HTTP ${res.status}`);
-      }
-      setCurrentUrl(null);
-      setMsg({ ok: true, text: "Removed." });
-    } catch (err) {
-      setMsg({ ok: false, text: (err as Error).message });
-    } finally {
-      setRemoving(false);
-    }
-  };
-
-  const preview = () => {
-    if (!currentUrl) return;
-    new Audio(currentUrl).play().catch(() => {});
-  };
-
-  return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-6">
-      <h2 className="mb-1 text-lg font-semibold">{label}</h2>
-
-      {currentUrl ? (
-        <div className="mb-4 flex items-center gap-3">
-          <span className="flex-1 truncate rounded bg-neutral-800 px-3 py-1 text-sm text-neutral-300">
-            {currentUrl.split("/").pop()?.split("?")[0]}
-          </span>
-          <button
-            type="button"
-            onClick={preview}
-            className="rounded bg-neutral-700 px-3 py-1 text-sm"
-          >
-            ▶ Preview
-          </button>
-          <button
-            type="button"
-            onClick={remove}
-            disabled={removing}
-            className="rounded bg-red-700 px-3 py-1 text-sm disabled:opacity-50"
-          >
-            {removing ? "Removing…" : "Remove"}
-          </button>
-        </div>
-      ) : (
-        <p className="mb-4 text-sm text-neutral-500">No sound configured — silent.</p>
-      )}
-
-      <label className="flex items-center gap-3">
-        <span className="text-sm text-neutral-400">Upload new sound</span>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="audio/mpeg,audio/wav,audio/ogg,audio/webm,audio/aac,.mp3,.wav,.ogg,.webm,.aac,.m4a"
-          disabled={uploading}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void upload(f);
-          }}
-          className="flex-1 rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-300 file:mr-3 file:rounded file:bg-blue-600 file:px-3 file:py-1 file:text-sm file:font-semibold file:text-white disabled:opacity-50"
-        />
-        {uploading ? (
-          <span className="text-sm text-neutral-400">Uploading…</span>
-        ) : null}
-      </label>
-
-      {msg ? (
-        <p className={`mt-3 text-sm ${msg.ok ? "text-emerald-400" : "text-red-400"}`}>
-          {msg.text}
-        </p>
-      ) : null}
-    </div>
-  );
-}
+import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
   const [days, setDays] = useState<number | "">("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const [soundSignIn, setSoundSignIn] = useState<string | null>(null);
-  const [soundSignOut, setSoundSignOut] = useState<string | null>(null);
-  const [soundsLoaded, setSoundsLoaded] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/settings", { cache: "no-store" })
@@ -137,16 +14,8 @@ export default function SettingsPage() {
         const row = rows.find((r) => r.key === "training_expiry_days");
         if (row) setDays(Number(row.value) || 365);
         else setDays(365);
-        const si = rows.find((r) => r.key === "sound_sign_in");
-        const so = rows.find((r) => r.key === "sound_sign_out");
-        setSoundSignIn(si?.value || null);
-        setSoundSignOut(so?.value || null);
-        setSoundsLoaded(true);
       })
-      .catch(() => {
-        setDays(365);
-        setSoundsLoaded(true);
-      });
+      .catch(() => setDays(365));
   }, []);
 
   const save = async () => {
@@ -214,31 +83,6 @@ export default function SettingsPage() {
           </p>
         ) : null}
       </section>
-
-      <div className="mt-6 space-y-4">
-        <h2 className="text-xl font-semibold">Notification sounds</h2>
-        <p className="text-sm text-neutral-400">
-          Audio files played on the roster screen when someone signs in or out.
-          Supported formats: mp3, wav, ogg, webm, aac.
-        </p>
-
-        {soundsLoaded ? (
-          <>
-            <SoundUploader
-              label="Sign-in sound"
-              settingKey="sound_sign_in"
-              initialUrl={soundSignIn}
-            />
-            <SoundUploader
-              label="Sign-out sound"
-              settingKey="sound_sign_out"
-              initialUrl={soundSignOut}
-            />
-          </>
-        ) : (
-          <p className="text-sm text-neutral-500">Loading…</p>
-        )}
-      </div>
     </div>
   );
 }

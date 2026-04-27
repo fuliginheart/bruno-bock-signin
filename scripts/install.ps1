@@ -243,8 +243,10 @@ function Install-Service {
   & nssm set $ServiceName AppRestartDelay 5000
 
   # Use our custom server.ts via tsx instead of `next start` (we have a custom server).
+  $tsx = "$InstallDir\node_modules\tsx\dist\cli.mjs"
   & nssm set $ServiceName Application $node
-  & nssm set $ServiceName AppParameters "$InstallDir\node_modules\tsx\dist\cli.mjs $InstallDir\server.ts"
+  & nssm set $ServiceName AppParameters "`"$tsx`" --env-file=`"$InstallDir\.env.local`" `"$InstallDir\server.ts`""
+  & nssm set $ServiceName AppEnvironmentExtra "NODE_ENV=production"
 
   & nssm start $ServiceName | Out-Null
   Write-Ok "Service '$ServiceName' installed and started."

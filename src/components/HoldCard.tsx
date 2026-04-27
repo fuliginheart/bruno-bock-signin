@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { playError, playSignIn, playSignOut, unlockAudio } from "@/client/audio";
+import { playError, unlockAudio } from "@/client/audio";
 
 const HOLD_MS = 1000;
 
@@ -53,8 +53,6 @@ export default function HoldCard(props: HoldCardProps) {
         startRef.current = null;
         const next = !onSite;
         setBusy(true);
-        if (next) playSignIn();
-        else playSignOut();
         onToggle(next)
           .catch(() => {
             playError();

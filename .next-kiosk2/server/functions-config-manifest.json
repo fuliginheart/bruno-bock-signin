@@ -1,8 +1,8 @@
 {
   "version": 1,
   "functions": {
-    "/api/media/[id]/[kind]": {},
     "/api/media/upload": {},
+    "/api/media/[id]/[kind]": {},
     "/api/stream": {}
   }
 }

@@ -32,20 +32,6 @@ export default function RosterClient() {
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(true);
 
-  // Sound URLs fetched once on mount; stored in refs so SSE closure is current.
-  const signInSoundRef = useRef<string | null>(null);
-  const signOutSoundRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/settings/sounds")
-      .then((r) => r.json())
-      .then((d: { signIn: string | null; signOut: string | null }) => {
-        signInSoundRef.current = d.signIn;
-        signOutSoundRef.current = d.signOut;
-      })
-      .catch(() => {});
-  }, []);
-
   async function loadRoster() {
     const roster = await fetchRoster();
     setRoster(roster.employees, roster.visitors);
@@ -86,17 +72,11 @@ export default function RosterClient() {
             loadRoster().catch(() => {});
           }
           // Play notification sounds on sign-in / sign-out.
-          if (data.event.action === "sign_in" && signInSoundRef.current) {
-            new Audio(signInSoundRef.current).play().catch(() => {});
+          if (data.event.action === "sign_in") {
+            new Audio("/sounds/sign-in.mp3").play().catch(() => {});
           }
-          if (data.event.action === "sign_out" && signOutSoundRef.current) {
-            new Audio(signOutSoundRef.current).play().catch(() => {});
-          }
-          // Keep sound refs current when admin changes settings.
-          if (data.event.action === "setting_set") {
-            const p = data.event.payload as { key: string; value: string };
-            if (p.key === "sound_sign_in") signInSoundRef.current = p.value || null;
-            if (p.key === "sound_sign_out") signOutSoundRef.current = p.value || null;
+          if (data.event.action === "sign_out") {
+            new Audio("/sounds/sign-out.mp3").play().catch(() => {});
           }
         }
       } catch {}
