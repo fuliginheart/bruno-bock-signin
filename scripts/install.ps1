@@ -126,7 +126,15 @@ function Install-Deps {
   try {
     & npm ci --no-audit --no-fund
     if ($LASTEXITCODE -ne 0) { throw "npm ci failed." }
-    Write-Step "Building Next.js"
+  } finally {
+    Pop-Location
+  }
+}
+
+function Build-App {
+  Write-Step "Building Next.js (requires .env.local)"
+  Push-Location $InstallDir
+  try {
     & npm run build
     if ($LASTEXITCODE -ne 0) { throw "npm run build failed." }
   } finally {
@@ -458,6 +466,7 @@ Install-Deps
 $cfg     = Get-Config
 $pinHash = Hash-Pin $cfg
 Write-EnvFile $cfg $pinHash
+Build-App
 Run-Migrations
 Install-Service
 Apply-EdgePolicies
