@@ -12,8 +12,22 @@ export interface HoldCardProps {
   subtitle?: string | null;
   photoSrc?: string | null;
   onSite: boolean;
+  since?: number | null;
   /** Called optimistically on hold completion. */
   onToggle: (next: boolean) => Promise<void>;
+}
+
+function formatSince(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return time;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  return (
+    d.toLocaleDateString([], { month: "short", day: "numeric" }) + ` ${time}`
+  );
 }
 
 export default function HoldCard(props: HoldCardProps) {
@@ -24,6 +38,7 @@ export default function HoldCard(props: HoldCardProps) {
     subtitle,
     photoSrc,
     onSite,
+    since,
     onToggle,
   } = props;
 
@@ -110,7 +125,7 @@ export default function HoldCard(props: HoldCardProps) {
       onPointerCancel={cancel}
       onPointerLeave={cancel}
       disabled={busy}
-      className={`relative flex ${subtitle ? "h-40" : "h-20"} select-none items-center justify-center overflow-hidden rounded-3xl text-center text-2xl font-semibold ring-2 transition duration-150 ease-out ${baseColor} ${ring} disabled:cursor-wait disabled:opacity-50 active:scale-[0.98]`}
+      className={`relative flex ${subtitle ? "h-44" : since ? "h-28" : "h-20"} select-none items-center justify-center overflow-hidden rounded-3xl text-center text-2xl font-semibold ring-2 transition duration-150 ease-out ${baseColor} ${ring} disabled:cursor-wait disabled:opacity-50 active:scale-[0.98]`}
     >
       <div
         aria-hidden
@@ -148,6 +163,11 @@ export default function HoldCard(props: HoldCardProps) {
             <span className="leading-tight">{displayName}</span>
           </>
         )}
+        {since != null ? (
+          <span className="mt-1 text-xs font-normal opacity-60">
+            {onSite ? "In" : "Out"} {formatSince(since)}
+          </span>
+        ) : null}
       </div>
     </button>
   );

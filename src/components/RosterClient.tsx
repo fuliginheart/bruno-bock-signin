@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import HoldCard from "@/components/HoldCard";
 import { useRoster, type RosterItem } from "@/client/roster-store";
 
@@ -31,6 +31,24 @@ export default function RosterClient() {
     useRoster();
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(true);
+  const [showTimes, setShowTimes] = useState(false);
+  const cornerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const onCornerDown = () => {
+    cornerTimerRef.current = setTimeout(() => {
+      setShowTimes((v) => !v);
+    }, 1200);
+  };
+  const onCornerUp = () => {
+    if (cornerTimerRef.current) {
+      clearTimeout(cornerTimerRef.current);
+      cornerTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => () => {
+    if (cornerTimerRef.current) clearTimeout(cornerTimerRef.current);
+  }, []);
 
   async function loadRoster() {
     const roster = await fetchRoster();
@@ -101,6 +119,16 @@ export default function RosterClient() {
 
   return (
     <main className="mx-auto max-w-screen-2xl px-6 py-6">
+      {/* Upper-left long-press — toggles last sign-in/out time on cards */}
+      <button
+        type="button"
+        aria-label="Toggle sign-in times"
+        onPointerDown={onCornerDown}
+        onPointerUp={onCornerUp}
+        onPointerLeave={onCornerUp}
+        onPointerCancel={onCornerUp}
+        className="fixed left-0 top-0 z-40 h-16 w-16 cursor-default opacity-0"
+      />
       {!connected ? (
         <div className="mb-4 rounded-lg bg-amber-900/50 px-4 py-2 text-amber-100 ring-1 ring-amber-700">
           Reconnecting to kiosk service… Sign-ins may be delayed.
@@ -139,6 +167,7 @@ export default function RosterClient() {
                 subjectId={e.id}
                 displayName={e.displayName}
                 onSite={e.onSite}
+                since={showTimes ? e.since : null}
                 onToggle={(next) => handleToggle(e, next)}
               />
             ))}
@@ -171,6 +200,7 @@ export default function RosterClient() {
                 subtitle={v.company}
                 photoSrc={v.photoPath ? `/api/media/${v.id}/photo` : null}
                 onSite={v.onSite}
+                since={showTimes ? v.since : null}
                 onToggle={(next) => handleToggle(v, next)}
               />
             ))}
