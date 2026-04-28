@@ -431,9 +431,9 @@ function Write-KioskShellScript($port, $kioskUser) {
   $lines = @(
     "@echo off",
     ":: Bruno Bock Kiosk Shell",
-    ":: Non-kiosk users fall through to explorer.exe.",
+    ":: Non-kiosk users fall through to explorer.exe normally.",
     "if /i ""%USERNAME%"" neq ""$kioskUser"" (",
-    "  start explorer.exe",
+    "  explorer.exe",
     "  exit",
     ")",
     "",
