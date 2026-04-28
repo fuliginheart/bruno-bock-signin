@@ -458,22 +458,72 @@ function Write-KioskShellScript($port, $kioskUser) {
   return $shellPath
 }
 
-function Configure-KioskShell($user, $shellPath) {
-  Write-Step "Configuring Windows kiosk shell"
+function Configure-KioskShell($user, $pass, $shellPath) {
+  Write-Step "Configuring kiosk shell for user '$user'"
 
-  # Set kiosk-shell.cmd as the system-wide Shell in HKLM.
-  # kiosk-shell.cmd starts explorer.exe for any user that isn't the kiosk user,
-  # so Admin and other accounts continue to work normally.
+  # Step 1: Restore HKLM Shell to explorer.exe so Admin and all non-kiosk users
+  # get a normal Windows desktop (userinit -> explorer.exe -> taskbar/desktop).
+  # The kiosk user gets their own HKCU Shell override set below.
   $winlogon = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-  Set-ItemProperty -Path $winlogon -Name "Shell" -Value "`"$shellPath`""
-  Write-Ok "HKLM Shell set to: $shellPath"
+  Set-ItemProperty -Path $winlogon -Name "Shell" -Value "explorer.exe"
+  Write-Ok "HKLM Shell = explorer.exe (Admin users get normal desktop)"
 
-  # Hide kiosk user from the sign-in screen - auto-login bypasses it anyway.
+  # Step 2: Ensure the kiosk user's Windows profile (NTUSER.DAT) exists.
+  $profileDir = "$env:SystemDrive\Users\$user"
+  $ntuserDat  = Join-Path $profileDir "NTUSER.DAT"
+  if (-not (Test-Path $ntuserDat)) {
+    Write-Host "    Creating user profile for '$user'..."
+    try {
+      $sec  = ConvertTo-SecureString $pass -AsPlainText -Force
+      $cred = New-Object System.Management.Automation.PSCredential("$env:COMPUTERNAME\$user", $sec)
+      Start-Process -FilePath "cmd.exe" -ArgumentList "/c exit" `
+        -Credential $cred -LoadUserProfile -Wait -WindowStyle Hidden -ErrorAction Stop
+      Start-Sleep -Seconds 2   # let Windows finish unloading the profile hive
+      Write-Ok "User profile created."
+    } catch {
+      Write-Warn2 "Profile auto-create failed ($_) -- copying Default profile as fallback..."
+      New-Item -ItemType Directory -Force $profileDir | Out-Null
+      Copy-Item "$env:SystemDrive\Users\Default\NTUSER.DAT" $ntuserDat -Force -ErrorAction SilentlyContinue
+    }
+  } else {
+    Write-Ok "Profile already exists at $profileDir"
+  }
+
+  # Step 3: Set Shell in the kiosk user's NTUSER.DAT so only they get kiosk-shell.cmd.
+  if (Test-Path $ntuserDat) {
+    Write-Host "    Setting HKCU Shell in '$user' NTUSER.DAT..."
+    $tempKey = "HKU\BrunoBockKioskSetup"
+    & reg load $tempKey $ntuserDat 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+      & reg add "$tempKey\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
+      [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+      # Retry unload up to 5 times in case the hive is still releasing.
+      for ($i = 0; $i -lt 5; $i++) {
+        & reg unload $tempKey 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { break }
+        Start-Sleep -Seconds 1
+      }
+      Write-Ok "HKCU Shell set to: $shellPath (kiosk user only)"
+    } else {
+      # Hive already loaded in HKU (e.g. reinstall while kiosk user is active).
+      $sid = (Get-LocalUser -Name $user).SID.Value
+      & reg add "HKU\$sid\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
+      if ($LASTEXITCODE -eq 0) {
+        Write-Ok "HKCU Shell set via live HKU\$sid key."
+      } else {
+        Write-Warn2 "Could not set HKCU Shell for '$user'. After reboot, kiosk user may see a normal desktop on first login."
+      }
+    }
+  } else {
+    Write-Warn2 "NTUSER.DAT not found at $ntuserDat -- kiosk shell not configured in HKCU."
+  }
+
+  # Step 4: Hide kiosk user from the sign-in screen - auto-login bypasses it anyway.
   $hideKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
   if (-not (Test-Path $hideKey)) { New-Item -Path $hideKey -Force | Out-Null }
   Set-ItemProperty -Path $hideKey -Name $user -Type DWord -Value 0
 
-  # Disable the lock screen so it never blocks the kiosk display.
+  # Step 5: Disable the lock screen so it never blocks the kiosk display.
   $policyKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
   if (-not (Test-Path $policyKey)) { New-Item -Path $policyKey -Force | Out-Null }
   Set-ItemProperty -Path $policyKey -Name "NoLockScreen" -Type DWord -Value 1
@@ -549,9 +599,9 @@ function Configure-AutoLogin($cfg, $shellPath) {
   Set-ItemProperty -Path $base -Name "DefaultDomainName" -Value $env:COMPUTERNAME
   Write-Ok "Auto-login enabled for '$user'."
 
-  # Replace the Windows shell (explorer.exe) with the kiosk launcher for this user.
+  # Set HKCU Shell for kiosk user only (HKLM Shell stays as explorer.exe for Admin).
   if ($shellPath) {
-    Configure-KioskShell $user $shellPath
+    Configure-KioskShell $user $pass $shellPath
   }
 }
 
