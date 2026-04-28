@@ -159,7 +159,7 @@ export default function RosterClient() {
         ) : employees.length === 0 ? (
           <p className="text-neutral-500">No employees configured. Use the admin panel to add some.</p>
         ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {employees.map((e) => (
               <HoldCard
                 key={e.id}
@@ -168,6 +168,7 @@ export default function RosterClient() {
                 displayName={e.displayName}
                 onSite={e.onSite}
                 since={showTimes ? e.since : null}
+                small
                 onToggle={(next) => handleToggle(e, next)}
               />
             ))}
