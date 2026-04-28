@@ -33,11 +33,23 @@ export interface AppliedEvent {
   payload: Record<string, unknown>;
 }
 
+function lastName(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/);
+  return parts[parts.length - 1].toLowerCase();
+}
+
+function sortByLastName(items: RosterItem[]): RosterItem[] {
+  return [...items].sort((a, b) =>
+    lastName(a.displayName).localeCompare(lastName(b.displayName)),
+  );
+}
+
 export const useRoster = create<RosterState>((set) => ({
   employees: [],
   visitors: [],
   ready: false,
-  setRoster: (employees, visitors) => set({ employees, visitors, ready: true }),
+  setRoster: (employees, visitors) =>
+    set({ employees: sortByLastName(employees), visitors, ready: true }),
   setOptimistic: (subjectType, id, onSite) =>
     set((s) => ({
       employees:
@@ -61,11 +73,11 @@ export const useRoster = create<RosterState>((set) => ({
       if (ev.subjectType === "employee") {
         return {
           ...s,
-          employees: s.employees.map((e) =>
+          employees: sortByLastName(s.employees.map((e) =>
             e.id === ev.subjectId
               ? { ...e, onSite, since: ev.createdAt }
               : e,
-          ),
+          )),
         };
       }
       return {
