@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Pull the latest code from GitHub, rebuild, and restart the kiosk service.
+  Download the latest code from GitHub, rebuild, and restart the kiosk service.
   Run this on the kiosk machine after pushing UI or code changes.
 
 .PARAMETER InstallDir
@@ -8,6 +8,12 @@
 
 .PARAMETER ServiceName
   NSSM service name. Default: BrunoBockApp
+
+.PARAMETER Repo
+  GitHub repo in owner/name format. Default: fuliginheart/bruno-bock-signin
+
+.PARAMETER Branch
+  Branch to pull. Default: main
 
 .EXAMPLE
   # From an Admin PowerShell prompt:
@@ -17,7 +23,9 @@
 [CmdletBinding()]
 param(
   [string] $InstallDir  = "C:\BrunoBock",
-  [string] $ServiceName = "BrunoBockApp"
+  [string] $ServiceName = "BrunoBockApp",
+  [string] $Repo        = "fuliginheart/bruno-bock-signin",
+  [string] $Branch      = "main"
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,18 +34,16 @@ function Write-Step($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Write-Ok($m)   { Write-Host "    OK: $m" -ForegroundColor Green }
 function Write-Warn($m) { Write-Host "    WARN: $m" -ForegroundColor Yellow }
 
-# Ensure nssm, node, git are on PATH regardless of how the session was opened.
+# Ensure node/npm are on PATH regardless of how the session was opened.
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
             [System.Environment]::GetEnvironmentVariable("Path","User") + ";" +
             "C:\Program Files\nodejs;" +
-            "C:\Program Files\Git\cmd;" +
             "C:\ProgramData\nssm\win64;" +
             "$env:APPDATA\npm"
 
-# Locate nssm - winget installs to ProgramData, direct-download goes to System32.
+# Locate nssm.
 $nssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
 if (-not $nssmCmd) {
-  # Last-resort: check common paths directly.
   $candidates = @(
     "C:\ProgramData\nssm\win64\nssm.exe",
     "C:\Windows\System32\nssm.exe",
@@ -50,19 +56,38 @@ if (-not $nssmCmd) {
 
 if (-not (Test-Path $InstallDir)) { throw "Install dir not found: $InstallDir" }
 
-
 Write-Step "Stopping service '$ServiceName'..."
 & nssm stop $ServiceName 2>&1 | Out-Null
 Start-Sleep -Seconds 2
 Write-Ok "Service stopped."
 
+# Download latest source as a zip from GitHub (no git required on the machine).
+Write-Step "Downloading latest code from GitHub ($Repo @ $Branch)..."
+$zipUrl  = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
+$zipPath = Join-Path $env:TEMP "brunobock-update.zip"
+$zipDir  = Join-Path $env:TEMP "brunobock-update-extract"
+Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+Write-Ok "Downloaded."
+
+Write-Step "Extracting..."
+if (Test-Path $zipDir) { Remove-Item $zipDir -Recurse -Force }
+Expand-Archive -Path $zipPath -DestinationPath $zipDir -Force
+# GitHub zips extract to a single subdirectory named <repo>-<branch>
+$extracted = Get-ChildItem -Path $zipDir -Directory | Select-Object -First 1
+if (-not $extracted) { throw "Could not find extracted folder inside zip." }
+Write-Ok "Extracted to $($extracted.FullName)"
+
+# Copy everything except node_modules, .next*, and data (preserve DB).
+Write-Step "Updating files in $InstallDir (preserving data\)..."
+$excludes = @("node_modules", ".next", ".next-kiosk1", ".next-kiosk2", "data")
+Get-ChildItem -Path $extracted.FullName -Force |
+  Where-Object { $excludes -notcontains $_.Name } |
+  ForEach-Object { Copy-Item -Path $_.FullName -Destination $InstallDir -Recurse -Force }
+Remove-Item $zipPath, $zipDir -Recurse -Force -ErrorAction SilentlyContinue
+Write-Ok "Files updated."
+
 Push-Location $InstallDir
 try {
-  Write-Step "Pulling latest code..."
-  & git pull --ff-only
-  if ($LASTEXITCODE -ne 0) { throw "git pull failed." }
-  Write-Ok "git pull complete."
-
   Write-Step "Installing/updating npm dependencies..."
   & npm install --prefer-offline --no-fund --no-audit
   if ($LASTEXITCODE -ne 0) { throw "npm install failed." }
