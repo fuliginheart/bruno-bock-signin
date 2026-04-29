@@ -1,55 +1,72 @@
 <#
 .SYNOPSIS
-  Update an existing Bruno Bock kiosk installation.
+  Pull the latest code from GitHub, rebuild, and restart the kiosk service.
+  Run this on the kiosk machine after pushing UI or code changes.
 
-.DESCRIPTION
-  Pulls the latest code (or unpacks a release zip), reinstalls deps, runs
-  migrations, and restarts the Windows service.
+.PARAMETER InstallDir
+  Where the app lives. Default: C:\BrunoBock
+
+.PARAMETER ServiceName
+  NSSM service name. Default: BrunoBockApp
+
+.EXAMPLE
+  # From an Admin PowerShell prompt:
+  Set-ExecutionPolicy -Scope Process Bypass -Force
+  & C:\BrunoBock\scripts\update.ps1
 #>
 [CmdletBinding()]
 param(
   [string] $InstallDir  = "C:\BrunoBock",
-  [string] $ServiceName = "BrunoBockApp",
-  [string] $ReleaseZip
+  [string] $ServiceName = "BrunoBockApp"
 )
 
 $ErrorActionPreference = "Stop"
 
 function Write-Step($m) { Write-Host "==> $m" -ForegroundColor Cyan }
+function Write-Ok($m)   { Write-Host "    OK: $m" -ForegroundColor Green }
+function Write-Warn($m) { Write-Host "    WARN: $m" -ForegroundColor Yellow }
 
 if (-not (Test-Path $InstallDir)) { throw "Install dir not found: $InstallDir" }
 
-Write-Step "Stopping service $ServiceName"
-& nssm stop $ServiceName confirm | Out-Null
+Write-Step "Stopping service '$ServiceName'..."
+& nssm stop $ServiceName 2>&1 | Out-Null
+Start-Sleep -Seconds 2
+Write-Ok "Service stopped."
 
 Push-Location $InstallDir
 try {
-  if ($ReleaseZip) {
-    Write-Step "Unpacking $ReleaseZip"
-    Expand-Archive -Path $ReleaseZip -DestinationPath $InstallDir -Force
-  } elseif (Test-Path (Join-Path $InstallDir ".git")) {
-    Write-Step "git pull"
-    & git pull --ff-only
-    if ($LASTEXITCODE -ne 0) { throw "git pull failed." }
-  } else {
-    Write-Host "No .git and no -ReleaseZip; skipping source update."
-  }
+  Write-Step "Pulling latest code..."
+  & git pull --ff-only
+  if ($LASTEXITCODE -ne 0) { throw "git pull failed." }
+  Write-Ok "git pull complete."
 
-  Write-Step "npm ci"
-  & npm ci --no-audit --no-fund
-  if ($LASTEXITCODE -ne 0) { throw "npm ci failed." }
+  Write-Step "Installing/updating npm dependencies..."
+  & npm install --prefer-offline --no-fund --no-audit
+  if ($LASTEXITCODE -ne 0) { throw "npm install failed." }
+  Write-Ok "Dependencies up to date."
 
-  Write-Step "Build"
+  Write-Step "Building app..."
   & npm run build
-  if ($LASTEXITCODE -ne 0) { throw "build failed." }
-
-  Write-Step "Migrate"
-  & npm run db:migrate
-  if ($LASTEXITCODE -ne 0) { throw "migrate failed." }
+  if ($LASTEXITCODE -ne 0) { throw "npm run build failed." }
+  Write-Ok "Build complete."
 } finally {
   Pop-Location
 }
 
-Write-Step "Starting service $ServiceName"
-& nssm start $ServiceName | Out-Null
-Write-Host "Update complete." -ForegroundColor Green
+Write-Step "Starting service '$ServiceName'..."
+& nssm start $ServiceName 2>&1 | Out-Null
+Start-Sleep -Seconds 3
+
+$status = & nssm status $ServiceName 2>&1
+Write-Host "    Service status: $status"
+if ($status -match "RUNNING") {
+  Write-Ok "Service is running."
+} else {
+  Write-Warn "Service may not have started. Check with: nssm status $ServiceName"
+}
+
+Write-Host ""
+Write-Host "==========================================" -ForegroundColor Magenta
+Write-Host " Bruno Bock update complete"               -ForegroundColor Magenta
+Write-Host "==========================================" -ForegroundColor Magenta
+Write-Host ""
