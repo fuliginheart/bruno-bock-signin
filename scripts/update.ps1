@@ -26,7 +26,30 @@ function Write-Step($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Write-Ok($m)   { Write-Host "    OK: $m" -ForegroundColor Green }
 function Write-Warn($m) { Write-Host "    WARN: $m" -ForegroundColor Yellow }
 
+# Ensure nssm, node, git are on PATH regardless of how the session was opened.
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+            [System.Environment]::GetEnvironmentVariable("Path","User") + ";" +
+            "C:\Program Files\nodejs;" +
+            "C:\Program Files\Git\cmd;" +
+            "C:\ProgramData\nssm\win64;" +
+            "$env:APPDATA\npm"
+
+# Locate nssm - winget installs to ProgramData, direct-download goes to System32.
+$nssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
+if (-not $nssmCmd) {
+  # Last-resort: check common paths directly.
+  $candidates = @(
+    "C:\ProgramData\nssm\win64\nssm.exe",
+    "C:\Windows\System32\nssm.exe",
+    "C:\Program Files\nssm\nssm.exe"
+  )
+  $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($found) { $env:Path += ";$(Split-Path $found)" }
+  else { throw "nssm not found. Re-run install.ps1 first, or install NSSM manually." }
+}
+
 if (-not (Test-Path $InstallDir)) { throw "Install dir not found: $InstallDir" }
+
 
 Write-Step "Stopping service '$ServiceName'..."
 & nssm stop $ServiceName 2>&1 | Out-Null
