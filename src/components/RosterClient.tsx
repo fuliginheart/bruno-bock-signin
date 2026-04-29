@@ -135,7 +135,7 @@ export default function RosterClient() {
         </div>
       ) : null}
       <header className="mb-6 flex items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">Bruno Bock — On-Site Roster</h1>
+        <h1 className="text-xl font-bold tracking-tight">Bruno Bock — On-Site Roster</h1>
       </header>
 
       {error ? (
@@ -177,13 +177,13 @@ export default function RosterClient() {
       </section>
 
       <section>
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3">
           <h2 className="text-xl font-semibold uppercase tracking-wide text-neutral-400">
             Visitors on site
           </h2>
           <a
             href="/visitor"
-            className="rounded-xl bg-blue-600 px-5 py-3 text-lg font-semibold hover:bg-blue-500"
+            className="mt-2 inline-block rounded-xl bg-blue-600 px-5 py-3 text-lg font-semibold hover:bg-blue-500"
           >
             + Sign in as Visitor
           </a>
