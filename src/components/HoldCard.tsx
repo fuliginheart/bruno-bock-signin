@@ -127,7 +127,7 @@ export default function HoldCard(props: HoldCardProps) {
       onPointerCancel={cancel}
       onPointerLeave={cancel}
       disabled={busy}
-      className={`relative flex ${subtitle ? "h-44" : since ? (small ? "h-20" : "h-28") : (small ? "h-12" : "h-20")} select-none items-center justify-center overflow-hidden rounded-3xl text-center ${small ? "text-base" : "text-2xl"} font-semibold ring-2 transition duration-150 ease-out ${baseColor} ${ring} disabled:cursor-wait disabled:opacity-50 active:scale-[0.98]`}
+      className={`relative flex ${subtitle ? "h-60" : since ? (small ? "h-28" : "h-36") : (small ? "h-16" : "h-28")} select-none items-center justify-center overflow-hidden rounded-[10px] text-center ${small ? "text-base" : "text-2xl"} font-semibold ring-2 transition duration-150 ease-out ${baseColor} ${ring} disabled:cursor-wait disabled:opacity-50 active:scale-[0.98]`}
     >
       <div
         aria-hidden
