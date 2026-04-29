@@ -273,16 +273,17 @@ function Get-Config {
     }
 
     return @{
-      KioskId     = $kiosk.id
-      KioskName   = $kiosk.name
-      Peers       = if ($kiosk.peers)  { $kiosk.peers  } else { "" }
-      PinHash     = $config.adminPinHash   # already hashed - skip hash-pin step
-      DbPath      = Join-Path $InstallDir "data\db.sqlite"
-      MediaPath   = Join-Path $InstallDir "data\media"
-      Port        = if ($kiosk.port)   { [string]$kiosk.port } else { "3000" }
-      AutoLogin   = [bool]$config.autoLogin
-      LoginUser   = if ($config.autoLoginUser)     { $config.autoLoginUser }     else { "KioskUser" }
-      LoginPass   = if ($config.autoLoginPassword) { $config.autoLoginPassword } else { "" }
+      KioskId       = $kiosk.id
+      KioskName     = $kiosk.name
+      Peers         = if ($kiosk.peers)         { $kiosk.peers         } else { "" }
+      MatchHostname = if ($kiosk.matchHostname) { $kiosk.matchHostname } else { "" }
+      PinHash       = $config.adminPinHash   # already hashed - skip hash-pin step
+      DbPath        = Join-Path $InstallDir "data\db.sqlite"
+      MediaPath     = Join-Path $InstallDir "data\media"
+      Port          = if ($kiosk.port) { [string]$kiosk.port } else { "3000" }
+      AutoLogin     = [bool]$config.autoLogin
+      LoginUser     = if ($config.autoLoginUser)     { $config.autoLoginUser }     else { "KioskUser" }
+      LoginPass     = if ($config.autoLoginPassword) { $config.autoLoginPassword } else { "" }
     }
   }
 
@@ -622,12 +623,27 @@ function Print-Summary($cfg) {
   Write-Host ""
 }
 
+function Rename-Machine($cfg) {
+  $target = $cfg.MatchHostname
+  if (-not $target) { return }
+  if ($env:COMPUTERNAME -ieq $target) {
+    Write-Ok "Hostname is already '$target'."
+    return
+  }
+  Write-Step "Renaming computer to '$target' (was '$env:COMPUTERNAME')"
+  Rename-Computer -NewName $target -Force -ErrorAction Stop
+  Write-Ok "Computer renamed. A reboot is required for the new name to take effect."
+  $script:NeedsReboot = $true
+}
+
 # --- Main ---
+$script:NeedsReboot = $false
 Assert-Admin
 if (-not $SkipPrereqs) { Install-Prereqs }
 Stage-App
 Install-Deps
 $cfg     = Get-Config
+Rename-Machine $cfg
 $pinHash = Hash-Pin $cfg
 Write-EnvFile $cfg $pinHash
 Build-App
@@ -639,3 +655,8 @@ Disable-Sleep
 Register-BackupTask $cfg
 Configure-AutoLogin $cfg $shellPath
 Print-Summary $cfg
+if ($script:NeedsReboot) {
+  Write-Host ""
+  Write-Host "  *** REBOOT REQUIRED to apply new hostname '$($cfg.MatchHostname)'. ***" -ForegroundColor Yellow
+  Write-Host ""
+}
