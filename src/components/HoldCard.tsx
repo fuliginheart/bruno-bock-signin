@@ -127,29 +127,36 @@ export default function HoldCard(props: HoldCardProps) {
       onPointerCancel={cancel}
       onPointerLeave={cancel}
       disabled={busy}
-      className={`relative flex ${subtitle ? "h-60" : since ? (small ? "h-28" : "h-36") : (small ? "h-16" : "h-28")} select-none items-center justify-center overflow-hidden rounded-[10px] text-center ${small ? "text-base" : "text-2xl"} font-semibold ring-2 transition duration-150 ease-out ${baseColor} ${ring} disabled:cursor-wait disabled:opacity-50 active:scale-[0.98]`}
+      className={`relative flex ${subtitle ? "h-28" : since ? (small ? "h-28" : "h-36") : (small ? "h-16" : "h-28")} select-none items-center justify-center overflow-hidden rounded-[10px] text-center ${small ? "text-base" : "text-2xl"} font-semibold ring-2 transition duration-150 ease-out ${baseColor} ${ring} disabled:cursor-wait disabled:opacity-50 active:scale-[0.98]`}
     >
       <div
         aria-hidden
         className={`pointer-events-none absolute top-0 bottom-0 transition-all duration-75 ${fillColor}`}
         style={fillStyle}
       />
-      <div className="relative z-10 flex w-full flex-col items-center px-3">
+      <div className="relative z-10 flex w-full items-center gap-3 px-3">
         {subtitle ? (
           <>
-            <span className="leading-tight">{displayName}</span>
-            <span className="mt-1 text-sm font-normal text-white/70">
-              {subtitle}
-            </span>
             {photoSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={photoSrc}
                 alt=""
-                className="mt-2 h-16 w-16 rounded-full object-cover ring-2 ring-white/40"
+                className="h-16 w-16 shrink-0 rounded-full object-cover ring-2 ring-white/40"
                 draggable={false}
               />
             ) : null}
+            <div className="flex min-w-0 flex-col text-left">
+              <span className="leading-tight">{displayName}</span>
+              <span className="mt-0.5 text-sm font-normal text-white/70 truncate">
+                {subtitle}
+              </span>
+              {since != null ? (
+                <span className="mt-0.5 text-xs font-normal opacity-60">
+                  {onSite ? "In" : "Out"} {formatSince(since)}
+                </span>
+              ) : null}
+            </div>
           </>
         ) : (
           <>
@@ -162,14 +169,16 @@ export default function HoldCard(props: HoldCardProps) {
                 draggable={false}
               />
             ) : null}
-            <span className="leading-tight">{displayName}</span>
+            <div className="flex min-w-0 flex-col items-center w-full">
+              <span className="leading-tight">{displayName}</span>
+              {since != null ? (
+                <span className="mt-1 text-xs font-normal opacity-60">
+                  {onSite ? "In" : "Out"} {formatSince(since)}
+                </span>
+              ) : null}
+            </div>
           </>
         )}
-        {since != null ? (
-          <span className="mt-1 text-xs font-normal opacity-60">
-            {onSite ? "In" : "Out"} {formatSince(since)}
-          </span>
-        ) : null}
       </div>
     </button>
   );
