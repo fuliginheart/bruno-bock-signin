@@ -181,32 +181,28 @@ export default function RosterClient() {
           <h2 className="text-xl font-semibold uppercase tracking-wide text-neutral-400">
             Visitors on site
           </h2>
+        </div>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           <a
             href="/visitor"
-            className="mt-2 inline-block rounded-xl bg-blue-600 px-5 py-3 text-lg font-semibold hover:bg-blue-500"
+            className="flex h-28 items-center justify-center rounded-[10px] bg-blue-600 text-center text-base font-semibold ring-2 ring-blue-400 hover:bg-blue-500"
           >
             + Sign in as Visitor
           </a>
+          {visitors.map((v) => (
+            <HoldCard
+              key={v.id}
+              subjectType="visitor"
+              subjectId={v.id}
+              displayName={v.displayName}
+              subtitle={v.company}
+              photoSrc={v.photoPath ? `/api/media/${v.id}/photo` : null}
+              onSite={v.onSite}
+              since={showTimes ? v.since : null}
+              onToggle={(next) => handleToggle(v, next)}
+            />
+          ))}
         </div>
-        {visitors.length === 0 ? (
-          <p className="text-neutral-500">No visitors on site.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {visitors.map((v) => (
-              <HoldCard
-                key={v.id}
-                subjectType="visitor"
-                subjectId={v.id}
-                displayName={v.displayName}
-                subtitle={v.company}
-                photoSrc={v.photoPath ? `/api/media/${v.id}/photo` : null}
-                onSite={v.onSite}
-                since={showTimes ? v.since : null}
-                onToggle={(next) => handleToggle(v, next)}
-              />
-            ))}
-          </div>
-        )}
       </section>
     </main>
   );
