@@ -178,10 +178,17 @@ function Stage-App {
     return
   }
 
-  $excludes = @("node_modules", ".next", ".git", "data")
-  Get-ChildItem -Path $repoRoot -Force | Where-Object { $excludes -notcontains $_.Name } | ForEach-Object {
-    Copy-Item -Path $_.FullName -Destination $InstallDir -Recurse -Force
-  }
+  # Use robocopy so files merge correctly into an existing directory.
+  # Copy-Item -Recurse nests subdirs inside existing dirs instead of merging.
+  $roboArgs = @(
+    $repoRoot, $InstallDir,
+    "/E",
+    "/XD", "node_modules", ".next", ".next-kiosk1", ".next-kiosk2", ".git", "data",
+    "/XF", ".env.local",
+    "/NP", "/NFL", "/NDL", "/NJH", "/NJS"
+  )
+  & robocopy @roboArgs | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
 
   # Grant Users group full inherited control so BBKioskUser and SYSTEM-owned files
   # are always writable by non-admin sessions (needed for update without elevation).

@@ -66,10 +66,17 @@ $repoDir = Get-ChildItem $extract | Select-Object -First 1 -ExpandProperty FullN
 # ---- Copy to InstallDir ----
 Write-Host "==> Copying to $InstallDir..." -ForegroundColor Cyan
 if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir | Out-Null }
-$excludes = @("node_modules", ".next*", ".git", "data")
-Get-ChildItem $repoDir -Force | Where-Object { $excludes -notcontains $_.Name } | ForEach-Object {
-  Copy-Item $_.FullName -Destination $InstallDir -Recurse -Force
-}
+# Use robocopy so files merge correctly into an existing directory.
+# Copy-Item -Recurse nests subdirs inside existing dirs instead of merging.
+$roboArgs = @(
+  $repoDir, $InstallDir,
+  "/E",
+  "/XD", "node_modules", ".next", ".next-kiosk1", ".next-kiosk2", ".git", "data",
+  "/XF", ".env.local",
+  "/NP", "/NFL", "/NDL", "/NJH", "/NJS"
+)
+& robocopy @roboArgs | Out-Null
+if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
 
 # ---- Clean up temp files ----
 Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
