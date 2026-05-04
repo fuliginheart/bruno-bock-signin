@@ -58,7 +58,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"
 
-$script:Version = "2026-05-04-E"
+$script:Version = "2026-05-04-F"
 Write-Host "==> install.ps1 version $($script:Version)" -ForegroundColor Magenta
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -539,13 +539,13 @@ function Configure-KioskShell($user, $pass, $shellPath) {
     Write-Host "    Setting HKCU Shell in '$user' NTUSER.DAT..."
     $sid     = (Get-LocalUser -Name $user -ErrorAction SilentlyContinue).SID.Value
     $tempKey = "HKU\BrunoBockKioskSetup"
+    $shellRegPath = "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    $shellSet = $false
 
-    # Try reg load first. If it fails (file in use = user is logged in), fall back
-    # to writing directly to the live HKU\<SID> hive — which is always present when
-    # NTUSER.DAT is in use.
+    # Method 1: reg load (works when user is NOT logged in)
     & reg load $tempKey $ntuserDat 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
-      & reg add "$tempKey\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
+      & reg add "$tempKey\$shellRegPath" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
       [GC]::Collect(); [GC]::WaitForPendingFinalizers()
       for ($i = 0; $i -lt 5; $i++) {
         & reg unload $tempKey 2>&1 | Out-Null
@@ -553,18 +553,38 @@ function Configure-KioskShell($user, $pass, $shellPath) {
         Start-Sleep -Seconds 1
       }
       Write-Ok "HKCU Shell set to: $shellPath (kiosk user only)"
-    } elseif ($sid) {
-      # NTUSER.DAT is in use because the user is currently logged in.
-      # The hive is already loaded under HKU\<SID> — write there directly.
-      Write-Host "    NTUSER.DAT in use; writing directly to live HKU\$sid..."
-      & reg add "HKU\$sid\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
+      $shellSet = $true
+    }
+
+    # Method 2: write to live HKU\<SID> (works when user IS logged in)
+    if (-not $shellSet -and $sid) {
+      Write-Host "    NTUSER.DAT in use; trying live HKU\$sid..."
+      & reg add "HKU\$sid\$shellRegPath" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
       if ($LASTEXITCODE -eq 0) {
         Write-Ok "HKCU Shell set via live HKU\$sid key."
-      } else {
-        Write-Warn2 "reg add to HKU\$sid failed (exit $LASTEXITCODE). Shell may not apply until reboot."
+        $shellSet = $true
       }
-    } else {
-      Write-Warn2 "Could not load NTUSER.DAT and SID lookup failed. Kiosk shell not configured."
+    }
+
+    # Method 3: schedule a one-time task to set the key at BBKioskUser's next logon.
+    # Runs immediately after the reboot that ends this install.
+    if (-not $shellSet -and $sid) {
+      Write-Host "    Scheduling one-time logon task to set Shell on next login..."
+      $cmd = "reg add `"HKU\$sid\$shellRegPath`" /v Shell /t REG_SZ /d `"$shellPath`" /f"
+      $action    = New-ScheduledTaskAction -Execute "reg.exe" `
+                     -Argument "add `"HKU\$sid\$shellRegPath`" /v Shell /t REG_SZ /d `"$shellPath`" /f"
+      $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $user
+      $settings  = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 1)
+      $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+      Unregister-ScheduledTask -TaskName "BrunoBockSetShell" -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+      Register-ScheduledTask -TaskName "BrunoBockSetShell" -Action $action -Trigger $trigger `
+        -Settings $settings -Principal $principal | Out-Null
+      Write-Ok "Scheduled task 'BrunoBockSetShell' will set Shell on next $user logon."
+      $shellSet = $true
+    }
+
+    if (-not $shellSet) {
+      Write-Warn2 "Could not set HKCU Shell by any method. Kiosk shell may not apply until manual fix."
     }
   } else {
     Write-Warn2 "NTUSER.DAT not found at $ntuserDat -- kiosk shell not configured in HKCU."
