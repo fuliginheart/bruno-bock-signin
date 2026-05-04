@@ -58,7 +58,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"
 
-$script:Version = "2026-05-04-D"
+$script:Version = "2026-05-04-E"
 Write-Host "==> install.ps1 version $($script:Version)" -ForegroundColor Magenta
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -540,32 +540,31 @@ function Configure-KioskShell($user, $pass, $shellPath) {
     $sid     = (Get-LocalUser -Name $user -ErrorAction SilentlyContinue).SID.Value
     $tempKey = "HKU\BrunoBockKioskSetup"
 
-    # If the user is currently logged in, NTUSER.DAT is already loaded under HKU\<SID>.
-    # Writing to it via reg load would fail with "file in use". Detect this and write directly.
-    $hiveAlreadyLoaded = $sid -and (Test-Path "HKU:\$sid")
-
-    if ($hiveAlreadyLoaded) {
-      Write-Host "    User is currently logged in; writing directly to live HKU\$sid..."
+    # Try reg load first. If it fails (file in use = user is logged in), fall back
+    # to writing directly to the live HKU\<SID> hive — which is always present when
+    # NTUSER.DAT is in use.
+    & reg load $tempKey $ntuserDat 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+      & reg add "$tempKey\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
+      [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+      for ($i = 0; $i -lt 5; $i++) {
+        & reg unload $tempKey 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { break }
+        Start-Sleep -Seconds 1
+      }
+      Write-Ok "HKCU Shell set to: $shellPath (kiosk user only)"
+    } elseif ($sid) {
+      # NTUSER.DAT is in use because the user is currently logged in.
+      # The hive is already loaded under HKU\<SID> — write there directly.
+      Write-Host "    NTUSER.DAT in use; writing directly to live HKU\$sid..."
       & reg add "HKU\$sid\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
       if ($LASTEXITCODE -eq 0) {
         Write-Ok "HKCU Shell set via live HKU\$sid key."
       } else {
-        Write-Warn2 "Could not set HKCU Shell for '$user' via live hive."
+        Write-Warn2 "reg add to HKU\$sid failed (exit $LASTEXITCODE). Shell may not apply until reboot."
       }
     } else {
-      & reg load $tempKey $ntuserDat 2>&1 | Out-Null
-      if ($LASTEXITCODE -eq 0) {
-        & reg add "$tempKey\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
-        [GC]::Collect(); [GC]::WaitForPendingFinalizers()
-        for ($i = 0; $i -lt 5; $i++) {
-          & reg unload $tempKey 2>&1 | Out-Null
-          if ($LASTEXITCODE -eq 0) { break }
-          Start-Sleep -Seconds 1
-        }
-        Write-Ok "HKCU Shell set to: $shellPath (kiosk user only)"
-      } else {
-        Write-Warn2 "Could not load NTUSER.DAT for '$user'. Kiosk shell may not apply until next reinstall."
-      }
+      Write-Warn2 "Could not load NTUSER.DAT and SID lookup failed. Kiosk shell not configured."
     }
   } else {
     Write-Warn2 "NTUSER.DAT not found at $ntuserDat -- kiosk shell not configured in HKCU."
