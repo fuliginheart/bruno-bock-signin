@@ -178,6 +178,11 @@ function Stage-App {
   Get-ChildItem -Path $repoRoot -Force | Where-Object { $excludes -notcontains $_.Name } | ForEach-Object {
     Copy-Item -Path $_.FullName -Destination $InstallDir -Recurse -Force
   }
+
+  # Grant Users group full inherited control so BBKioskUser and SYSTEM-owned files
+  # are always writable by non-admin sessions (needed for update without elevation).
+  & icacls $InstallDir /grant "BUILTIN\Users:(OI)(CI)F" /T /Q 2>&1 | Out-Null
+
   Write-Ok "Staged."
 }
 

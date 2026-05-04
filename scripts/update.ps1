@@ -107,7 +107,9 @@ Push-Location $InstallDir
 try {
   # The service runs as LocalSystem, so node_modules may be owned by SYSTEM.
   # Take ownership so the current user can write during npm install.
-  if (Test-Path (Join-Path $InstallDir "node_modules")) {
+  # Skip silently when running without elevation (-SkipServiceControl) since
+  # install.ps1 now grants Users:(OI)(CI)F on the install dir at install time.
+  if (-not $SkipServiceControl -and (Test-Path (Join-Path $InstallDir "node_modules"))) {
     Write-Step "Taking ownership of node_modules..."
     & takeown /f "$InstallDir\node_modules" /r /d y 2>&1 | Out-Null
     & icacls "$InstallDir\node_modules" /grant "Everyone:F" /t /q 2>&1 | Out-Null
