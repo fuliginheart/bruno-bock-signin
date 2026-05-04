@@ -58,6 +58,9 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"
 
+$script:Version = "2026-05-04-C"
+Write-Host "==> install.ps1 version $($script:Version)" -ForegroundColor Magenta
+
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "    OK: $msg" -ForegroundColor Green }
 function Write-Warn2($msg){ Write-Host "    !! $msg" -ForegroundColor Yellow }
