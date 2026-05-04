@@ -58,7 +58,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"
 
-$script:Version = "2026-05-04-H"
+$script:Version = "2026-05-04-I"
 Write-Host "==> install.ps1 version $($script:Version)" -ForegroundColor Magenta
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -94,7 +94,7 @@ function Install-Nssm {
   # Try winget first (may fail on some machines - that's OK).
   if (Test-Cmd "winget") {
     Write-Host "    Trying winget for NSSM..."
-    & winget install --id NSSM.NSSM -e --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+    $null = & winget install --id NSSM.NSSM -e --silent --accept-source-agreements --accept-package-agreements 2>&1
     Refresh-Path
     if (Test-Cmd "nssm") { Write-Ok "NSSM installed via winget."; return }
   }
@@ -132,7 +132,7 @@ function Install-Prereqs {
   } else {
     Write-Host "    Installing Node.js LTS..."
     if (Test-Cmd "winget") {
-      & winget install --id OpenJS.NodeJS.LTS -e --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+      $null = & winget install --id OpenJS.NodeJS.LTS -e --silent --accept-source-agreements --accept-package-agreements 2>&1
     }
     Refresh-Path
     if (-not (Test-Cmd "node")) {
@@ -147,7 +147,7 @@ function Install-Prereqs {
   } else {
     Write-Host "    Installing Git..."
     if (Test-Cmd "winget") {
-      & winget install --id Git.Git -e --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+      $null = & winget install --id Git.Git -e --silent --accept-source-agreements --accept-package-agreements 2>&1
     }
     Refresh-Path
     if (-not (Test-Cmd "git")) {
@@ -178,9 +178,9 @@ function Stage-App {
   # Always fix permissions on the install dir — on reinstall the service may have
   # created SYSTEM-owned files. takeown + icacls ensures npm ci can write.
   Write-Host "    Fixing permissions on $InstallDir..."
-  & takeown /f $InstallDir /r /d y 2>&1 | Out-Null
-  & icacls $InstallDir /grant "Administrators:(OI)(CI)F" /T /Q 2>&1 | Out-Null
-  & icacls $InstallDir /grant "BUILTIN\Users:(OI)(CI)F" /T /Q 2>&1 | Out-Null
+  $null = & takeown /f $InstallDir /r /d y 2>&1
+  $null = & icacls $InstallDir /grant "Administrators:(OI)(CI)F" /T /Q 2>&1
+  $null = & icacls $InstallDir /grant "BUILTIN\Users:(OI)(CI)F" /T /Q 2>&1
   Write-Ok "Permissions fixed."
 
   $sameLocation = (Resolve-Path $repoRoot).Path -ieq (Resolve-Path $InstallDir).Path
@@ -212,8 +212,8 @@ function Install-Deps {
   $nm = Join-Path $InstallDir "node_modules"
   if (Test-Path $nm) {
     Write-Host "    Clearing old node_modules (may be SYSTEM-owned)..."
-    & takeown /f $nm /r /d y 2>&1 | Out-Null
-    & icacls $nm /grant "Administrators:F" /t /q 2>&1 | Out-Null
+    $null = & takeown /f $nm /r /d y 2>&1
+    $null = & icacls $nm /grant "Administrators:F" /t /q 2>&1
     Remove-Item $nm -Recurse -Force -ErrorAction SilentlyContinue
     Write-Ok "node_modules removed."
   }
@@ -540,12 +540,14 @@ function Configure-KioskShell($user, $pass, $shellPath) {
     $shellSet = $false
 
     # Method 1: reg load (works when user is NOT logged in)
-    & reg load $tempKey $ntuserDat 2>&1 | Out-Null
+    # Use $null = instead of 2>&1 | Out-Null — piping native commands under
+    # $ErrorActionPreference=Stop throws NativeCommandError on any stderr output.
+    $null = & reg load $tempKey $ntuserDat 2>&1
     if ($LASTEXITCODE -eq 0) {
-      & reg add "$tempKey\$shellRegPath" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
+      $null = & reg add "$tempKey\$shellRegPath" /v Shell /t REG_SZ /d $shellPath /f 2>&1
       [GC]::Collect(); [GC]::WaitForPendingFinalizers()
       for ($i = 0; $i -lt 5; $i++) {
-        & reg unload $tempKey 2>&1 | Out-Null
+        $null = & reg unload $tempKey 2>&1
         if ($LASTEXITCODE -eq 0) { break }
         Start-Sleep -Seconds 1
       }
@@ -556,7 +558,7 @@ function Configure-KioskShell($user, $pass, $shellPath) {
     # Method 2: write to live HKU\<SID> (works when user IS logged in)
     if (-not $shellSet -and $sid) {
       Write-Host "    NTUSER.DAT in use; trying live HKU\$sid..."
-      & reg add "HKU\$sid\$shellRegPath" /v Shell /t REG_SZ /d $shellPath /f 2>&1 | Out-Null
+      $null = & reg add "HKU\$sid\$shellRegPath" /v Shell /t REG_SZ /d $shellPath /f 2>&1
       if ($LASTEXITCODE -eq 0) {
         Write-Ok "HKCU Shell set via live HKU\$sid key."
         $shellSet = $true
@@ -735,7 +737,7 @@ Write-Step "Stopping kiosk service (if running)..."
 $nssmExe = @("C:\ProgramData\nssm\win64\nssm.exe","C:\Windows\System32\nssm.exe","C:\Program Files\nssm\nssm.exe") |
   Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($nssmExe) {
-  & $nssmExe stop $ServiceName 2>&1 | Out-Null
+  $null = & $nssmExe stop $ServiceName 2>&1
   Write-Ok "Service stop signal sent."
 } else {
   Write-Ok "NSSM not found yet; skipping service stop."
