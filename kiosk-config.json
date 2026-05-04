@@ -13,14 +13,14 @@
       "id": "lobby",
       "name": "Lobby Kiosk",
       "port": 3000,
-      "peers": "http://192.168.200.175:3000",
+      "peers": "http://192.168.200.176:3000",
       "matchHostname": "KIOSK-LOBBY"
     },
     {
       "id": "dock",
       "name": "Dock Kiosk",
       "port": 3000,
-      "peers": "http://192.168.200.176:3000",
+      "peers": "http://192.168.200.175:3000",
       "matchHostname": "KIOSK-BREAK"
     }
   ]
