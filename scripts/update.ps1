@@ -22,10 +22,11 @@
 #>
 [CmdletBinding()]
 param(
-  [string] $InstallDir  = "C:\BrunoBock",
-  [string] $ServiceName = "BrunoBockApp",
-  [string] $Repo        = "fuliginheart/bruno-bock-signin",
-  [string] $Branch      = "main"
+  [string] $InstallDir        = "C:\BrunoBock",
+  [string] $ServiceName      = "BrunoBockApp",
+  [string] $Repo             = "fuliginheart/bruno-bock-signin",
+  [string] $Branch           = "main",
+  [switch] $SkipServiceControl   # Use when running without elevation; reboot to apply
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,28 +42,34 @@ $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";"
             "C:\ProgramData\nssm\win64;" +
             "$env:APPDATA\npm"
 
-# Locate nssm.
-$nssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
-if (-not $nssmCmd) {
-  $candidates = @(
-    "C:\ProgramData\nssm\win64\nssm.exe",
-    "C:\Windows\System32\nssm.exe",
-    "C:\Program Files\nssm\nssm.exe"
-  )
-  $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if ($found) { $env:Path += ";$(Split-Path $found)" }
-  else { throw "nssm not found. Re-run install.ps1 first, or install NSSM manually." }
-}
-
 if (-not (Test-Path $InstallDir)) { throw "Install dir not found: $InstallDir" }
 
-Write-Step "Stopping service '$ServiceName'..."
-& nssm stop $ServiceName 2>&1 | Out-Null
-Start-Sleep -Seconds 3
-# Kill any lingering node processes that might hold file locks.
-Stop-Process -Name "node" -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 1
-Write-Ok "Service stopped."
+if ($SkipServiceControl) {
+  Write-Warn "Skipping service control (running without elevation)."
+  Write-Warn "A reboot will be required after the update to restart the service."
+  # Kill any node processes we can (non-elevated, best-effort) to free file locks.
+  Stop-Process -Name "node" -Force -ErrorAction SilentlyContinue
+} else {
+  # Locate nssm.
+  $nssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
+  if (-not $nssmCmd) {
+    $candidates = @(
+      "C:\ProgramData\nssm\win64\nssm.exe",
+      "C:\Windows\System32\nssm.exe",
+      "C:\Program Files\nssm\nssm.exe"
+    )
+    $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($found) { $env:Path += ";$(Split-Path $found)" }
+    else { throw "nssm not found. Re-run install.ps1 first, or install NSSM manually." }
+  }
+
+  Write-Step "Stopping service '$ServiceName'..."
+  & nssm stop $ServiceName 2>&1 | Out-Null
+  Start-Sleep -Seconds 3
+  Stop-Process -Name "node" -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 1
+  Write-Ok "Service stopped."
+}
 
 # Download latest source as a zip from GitHub (no git required on the machine).
 Write-Step "Downloading latest code from GitHub ($Repo @ $Branch)..."
@@ -99,11 +106,11 @@ Write-Ok "Files updated."
 Push-Location $InstallDir
 try {
   # The service runs as LocalSystem, so node_modules may be owned by SYSTEM.
-  # Take ownership so the current Admin user can write during npm install.
+  # Take ownership so the current user can write during npm install.
   if (Test-Path (Join-Path $InstallDir "node_modules")) {
     Write-Step "Taking ownership of node_modules..."
     & takeown /f "$InstallDir\node_modules" /r /d y 2>&1 | Out-Null
-    & icacls "$InstallDir\node_modules" /grant "Administrators:F" /t /q 2>&1 | Out-Null
+    & icacls "$InstallDir\node_modules" /grant "Everyone:F" /t /q 2>&1 | Out-Null
     Write-Ok "Ownership granted."
   }
 
@@ -120,16 +127,22 @@ try {
   Pop-Location
 }
 
-Write-Step "Starting service '$ServiceName'..."
-& nssm start $ServiceName 2>&1 | Out-Null
-Start-Sleep -Seconds 3
-
-$status = & nssm status $ServiceName 2>&1
-Write-Host "    Service status: $status"
-if ($status -match "RUNNING") {
-  Write-Ok "Service is running."
+if ($SkipServiceControl) {
+  Write-Host ""
+  Write-Host "  Update complete. A REBOOT IS REQUIRED to restart the kiosk service." -ForegroundColor Yellow
+  Write-Host "  Run: shutdown /r /t 0" -ForegroundColor Yellow
 } else {
-  Write-Warn "Service may not have started. Check with: nssm status $ServiceName"
+  Write-Step "Starting service '$ServiceName'..."
+  & nssm start $ServiceName 2>&1 | Out-Null
+  Start-Sleep -Seconds 3
+
+  $status = & nssm status $ServiceName 2>&1
+  Write-Host "    Service status: $status"
+  if ($status -match "RUNNING") {
+    Write-Ok "Service is running."
+  } else {
+    Write-Warn "Service may not have started. Check with: nssm status $ServiceName"
+  }
 }
 
 Write-Host ""
