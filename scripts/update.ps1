@@ -80,12 +80,19 @@ $extracted = Get-ChildItem -Path $zipDir -Directory | Select-Object -First 1
 if (-not $extracted) { throw "Could not find extracted folder inside zip." }
 Write-Ok "Extracted to $($extracted.FullName)"
 
-# Copy everything except node_modules, .next*, and data (preserve DB).
-Write-Step "Updating files in $InstallDir (preserving data\)..."
-$excludes = @("node_modules", ".next", ".next-kiosk1", ".next-kiosk2", "data")
-Get-ChildItem -Path $extracted.FullName -Force |
-  Where-Object { $excludes -notcontains $_.Name } |
-  ForEach-Object { Copy-Item -Path $_.FullName -Destination $InstallDir -Recurse -Force }
+# Copy everything except node_modules, .next*, and data (preserve DB + env).
+# robocopy merges directories correctly; Copy-Item -Recurse nests dirs when dest exists.
+Write-Step "Updating files in $InstallDir (preserving data\ and .env.local)..."
+$roboArgs = @(
+  $extracted.FullName, $InstallDir,
+  "/E",                                                         # include subdirs
+  "/XD", "node_modules", ".next", ".next-kiosk1", ".next-kiosk2", "data",
+  "/XF", ".env.local",                                          # preserve live config
+  "/NP", "/NFL", "/NDL", "/NJH", "/NJS"                        # quiet output
+)
+& robocopy @roboArgs | Out-Null
+# robocopy exit codes: 0=no change, 1=copied, 2=extra, 3=both — all fine. 8+ = error.
+if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
 Remove-Item $zipPath, $zipDir -Recurse -Force -ErrorAction SilentlyContinue
 Write-Ok "Files updated."
 
