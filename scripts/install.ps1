@@ -58,7 +58,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"
 
-$script:Version = "2026-05-04-C"
+$script:Version = "2026-05-04-D"
 Write-Host "==> install.ps1 version $($script:Version)" -ForegroundColor Magenta
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -713,6 +713,20 @@ function Rename-Machine($cfg) {
 # --- Main ---
 $script:NeedsReboot = $false
 Assert-Admin
+
+# Stop the service and kill node FIRST so no files are locked during staging/npm ci.
+Write-Step "Stopping kiosk service (if running)..."
+$nssmExe = @("C:\ProgramData\nssm\win64\nssm.exe","C:\Windows\System32\nssm.exe","C:\Program Files\nssm\nssm.exe") |
+  Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($nssmExe) {
+  & $nssmExe stop $ServiceName 2>&1 | Out-Null
+  Write-Ok "Service stop signal sent."
+} else {
+  Write-Ok "NSSM not found yet; skipping service stop."
+}
+Stop-Process -Name "node" -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+
 if (-not $SkipPrereqs) { Install-Prereqs }
 Stage-App
 Install-Deps
