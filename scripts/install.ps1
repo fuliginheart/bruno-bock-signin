@@ -565,6 +565,25 @@ function Register-BackupTask($cfg) {
   Write-Ok "Scheduled task '$taskName' created."
 }
 
+function Enable-RDP {
+  Write-Step "Enabling Remote Desktop (RDP)"
+
+  # Enable RDP in the registry
+  Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+    -Name "fDenyTSConnections" -Value 0 -Type DWord
+
+  # Allow RDP through the firewall
+  Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+  # Fallback for localised Windows builds
+  netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null | Out-Null
+
+  # Require Network Level Authentication (NLA) — more secure
+  Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+    -Name "UserAuthentication" -Value 1 -Type DWord
+
+  Write-Ok "RDP enabled. Connect with: mstsc /v:$($env:COMPUTERNAME)"
+}
+
 function Configure-AutoLogin($cfg, $shellPath) {
   $doIt = $cfg.AutoLogin -or $EnableAutoLogin
   if (-not $doIt) {
@@ -622,6 +641,7 @@ function Print-Summary($cfg) {
   Write-Host ""
   Write-Host " To exit kiosk Edge: Ctrl+Shift+W or Alt+F4."
   Write-Host " To open admin: long-press the top-right corner for 3 seconds."
+  Write-Host " RDP access  : mstsc /v:$($env:COMPUTERNAME) (Admin user, port 3389)"
   Write-Host ""
 }
 
@@ -652,6 +672,7 @@ Build-App
 Run-Migrations
 Install-Service
 Apply-EdgePolicies
+Enable-RDP
 $shellPath = Write-KioskShellScript $cfg.Port $cfg.LoginUser
 Disable-Sleep
 Register-BackupTask $cfg
