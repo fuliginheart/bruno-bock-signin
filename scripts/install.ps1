@@ -58,7 +58,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"
 
-$script:Version = "2026-05-04-G"
+$script:Version = "2026-05-04-H"
 Write-Host "==> install.ps1 version $($script:Version)" -ForegroundColor Magenta
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -218,18 +218,9 @@ function Install-Deps {
     Write-Ok "node_modules removed."
   }
 
-  # Use a fresh local cache dir so we never hit SYSTEM-owned global cache files.
+  # Use a fresh local cache dir in TEMP — guaranteed writable, no SYSTEM ownership.
   $npmCache = Join-Path $env:TEMP "brunobock-npm-cache"
   if (Test-Path $npmCache) { Remove-Item $npmCache -Recurse -Force -ErrorAction SilentlyContinue }
-
-  # Also clear the per-user npm cache which may be SYSTEM-owned from a previous run.
-  $globalCache = & npm config get cache 2>$null
-  if ($globalCache -and (Test-Path $globalCache)) {
-    Write-Host "    Clearing npm cache at $globalCache ..."
-    & takeown /f $globalCache /r /d y 2>&1 | Out-Null
-    & icacls $globalCache /grant "Administrators:F" /t /q 2>&1 | Out-Null
-    & npm cache clean --force 2>&1 | Out-Null
-  }
 
   Push-Location $InstallDir
   try {
