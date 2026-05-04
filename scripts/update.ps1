@@ -58,7 +58,10 @@ if (-not (Test-Path $InstallDir)) { throw "Install dir not found: $InstallDir" }
 
 Write-Step "Stopping service '$ServiceName'..."
 & nssm stop $ServiceName 2>&1 | Out-Null
-Start-Sleep -Seconds 2
+Start-Sleep -Seconds 3
+# Kill any lingering node processes that might hold file locks.
+Stop-Process -Name "node" -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 1
 Write-Ok "Service stopped."
 
 # Download latest source as a zip from GitHub (no git required on the machine).
@@ -88,6 +91,15 @@ Write-Ok "Files updated."
 
 Push-Location $InstallDir
 try {
+  # The service runs as LocalSystem, so node_modules may be owned by SYSTEM.
+  # Take ownership so the current Admin user can write during npm install.
+  if (Test-Path (Join-Path $InstallDir "node_modules")) {
+    Write-Step "Taking ownership of node_modules..."
+    & takeown /f "$InstallDir\node_modules" /r /d y 2>&1 | Out-Null
+    & icacls "$InstallDir\node_modules" /grant "Administrators:F" /t /q 2>&1 | Out-Null
+    Write-Ok "Ownership granted."
+  }
+
   Write-Step "Installing/updating npm dependencies..."
   & npm install --prefer-offline --no-fund --no-audit
   if ($LASTEXITCODE -ne 0) { throw "npm install failed." }
