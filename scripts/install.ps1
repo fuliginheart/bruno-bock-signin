@@ -172,6 +172,14 @@ function Stage-App {
     New-Item -ItemType Directory -Path $InstallDir | Out-Null
   }
 
+  # Always fix permissions on the install dir — on reinstall the service may have
+  # created SYSTEM-owned files. takeown + icacls ensures npm ci can write.
+  Write-Host "    Fixing permissions on $InstallDir..."
+  & takeown /f $InstallDir /r /d y 2>&1 | Out-Null
+  & icacls $InstallDir /grant "Administrators:(OI)(CI)F" /T /Q 2>&1 | Out-Null
+  & icacls $InstallDir /grant "BUILTIN\Users:(OI)(CI)F" /T /Q 2>&1 | Out-Null
+  Write-Ok "Permissions fixed."
+
   $sameLocation = (Resolve-Path $repoRoot).Path -ieq (Resolve-Path $InstallDir).Path
   if ($sameLocation) {
     Write-Ok "Repository already lives at install dir; skipping copy."
@@ -189,10 +197,6 @@ function Stage-App {
   )
   & robocopy @roboArgs | Out-Null
   if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
-
-  # Grant Users group full inherited control so BBKioskUser and SYSTEM-owned files
-  # are always writable by non-admin sessions (needed for update without elevation).
-  & icacls $InstallDir /grant "BUILTIN\Users:(OI)(CI)F" /T /Q 2>&1 | Out-Null
 
   Write-Ok "Staged."
 }
