@@ -192,6 +192,18 @@ function Stage-App {
 
 function Install-Deps {
   Write-Step "Installing npm dependencies (npm ci)"
+
+  # On reinstall, node_modules may be owned by SYSTEM (left by the old service).
+  # Take ownership and nuke it so npm ci gets a clean slate.
+  $nm = Join-Path $InstallDir "node_modules"
+  if (Test-Path $nm) {
+    Write-Host "    Clearing old node_modules (may be SYSTEM-owned)..."
+    & takeown /f $nm /r /d y 2>&1 | Out-Null
+    & icacls $nm /grant "Administrators:F" /t /q 2>&1 | Out-Null
+    Remove-Item $nm -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Ok "node_modules removed."
+  }
+
   Push-Location $InstallDir
   try {
     & npm ci --no-audit --no-fund
