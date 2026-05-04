@@ -58,7 +58,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"
 
-$script:Version = "2026-05-04-F"
+$script:Version = "2026-05-04-G"
 Write-Host "==> install.ps1 version $($script:Version)" -ForegroundColor Magenta
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -205,10 +205,10 @@ function Stage-App {
 }
 
 function Install-Deps {
-  Write-Step "Installing npm dependencies (npm ci)"
+  Write-Step "Installing npm dependencies"
 
   # On reinstall, node_modules may be owned by SYSTEM (left by the old service).
-  # Take ownership and nuke it so npm ci gets a clean slate.
+  # Take ownership and nuke it so npm gets a clean slate.
   $nm = Join-Path $InstallDir "node_modules"
   if (Test-Path $nm) {
     Write-Host "    Clearing old node_modules (may be SYSTEM-owned)..."
@@ -218,19 +218,25 @@ function Install-Deps {
     Write-Ok "node_modules removed."
   }
 
-  # The npm cache may also be SYSTEM-owned (service ran npm during build).
-  # Point to a fresh local cache to avoid EPERM errors.
-  $npmCache = Join-Path $InstallDir ".npm-cache"
-  if (Test-Path $npmCache) {
-    & takeown /f $npmCache /r /d y 2>&1 | Out-Null
-    & icacls $npmCache /grant "Administrators:F" /t /q 2>&1 | Out-Null
-    Remove-Item $npmCache -Recurse -Force -ErrorAction SilentlyContinue
+  # Use a fresh local cache dir so we never hit SYSTEM-owned global cache files.
+  $npmCache = Join-Path $env:TEMP "brunobock-npm-cache"
+  if (Test-Path $npmCache) { Remove-Item $npmCache -Recurse -Force -ErrorAction SilentlyContinue }
+
+  # Also clear the per-user npm cache which may be SYSTEM-owned from a previous run.
+  $globalCache = & npm config get cache 2>$null
+  if ($globalCache -and (Test-Path $globalCache)) {
+    Write-Host "    Clearing npm cache at $globalCache ..."
+    & takeown /f $globalCache /r /d y 2>&1 | Out-Null
+    & icacls $globalCache /grant "Administrators:F" /t /q 2>&1 | Out-Null
+    & npm cache clean --force 2>&1 | Out-Null
   }
 
   Push-Location $InstallDir
   try {
-    & npm ci --no-audit --no-fund --cache $npmCache
-    if ($LASTEXITCODE -ne 0) { throw "npm ci failed." }
+    # Use npm install (not npm ci) - more resilient to stale lock files and permissions.
+    Write-Host "    Running: npm install --cache $npmCache"
+    & npm install --no-audit --no-fund --cache $npmCache
+    if ($LASTEXITCODE -ne 0) { throw "npm install failed (exit $LASTEXITCODE)." }
   } finally {
     Pop-Location
   }
