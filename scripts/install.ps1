@@ -204,9 +204,18 @@ function Install-Deps {
     Write-Ok "node_modules removed."
   }
 
+  # The npm cache may also be SYSTEM-owned (service ran npm during build).
+  # Point to a fresh local cache to avoid EPERM errors.
+  $npmCache = Join-Path $InstallDir ".npm-cache"
+  if (Test-Path $npmCache) {
+    & takeown /f $npmCache /r /d y 2>&1 | Out-Null
+    & icacls $npmCache /grant "Administrators:F" /t /q 2>&1 | Out-Null
+    Remove-Item $npmCache -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
   Push-Location $InstallDir
   try {
-    & npm ci --no-audit --no-fund
+    & npm ci --no-audit --no-fund --cache $npmCache
     if ($LASTEXITCODE -ne 0) { throw "npm ci failed." }
   } finally {
     Pop-Location
