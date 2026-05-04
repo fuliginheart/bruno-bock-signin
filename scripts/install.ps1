@@ -598,6 +598,8 @@ function Configure-AutoLogin($cfg, $shellPath) {
   Set-ItemProperty -Path $base -Name "DefaultUserName" -Value $user
   Set-ItemProperty -Path $base -Name "DefaultPassword" -Value $pass
   Set-ItemProperty -Path $base -Name "DefaultDomainName" -Value $env:COMPUTERNAME
+  # ForceAutoLogon re-arms auto-login on every boot so Windows cannot clear DefaultPassword.
+  Set-ItemProperty -Path $base -Name "ForceAutoLogon"  -Value "1"
   Write-Ok "Auto-login enabled for '$user'."
 
   # Set HKCU Shell for kiosk user only (HKLM Shell stays as explorer.exe for Admin).
