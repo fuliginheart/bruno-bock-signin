@@ -58,7 +58,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"
 
-$script:Version = "2026-05-04-I"
+$script:Version = "2026-05-04-J"
 Write-Host "==> install.ps1 version $($script:Version)" -ForegroundColor Magenta
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -645,13 +645,23 @@ function Enable-RDP {
   # Allow RDP through the firewall
   Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
   # Fallback for localised Windows builds
-  netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null | Out-Null
+  $null = netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>&1
 
   # Require Network Level Authentication (NLA) — more secure
   Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
     -Name "UserAuthentication" -Value 1 -Type DWord
 
   Write-Ok "RDP enabled. Connect with: mstsc /v:$($env:COMPUTERNAME)"
+}
+
+function Open-KioskFirewall($port) {
+  Write-Step "Opening firewall for kiosk app (port $port)"
+  $ruleName = "BrunoBockKiosk-$port"
+  # Remove old rule if present, then recreate cleanly.
+  $null = netsh advfirewall firewall delete rule name=$ruleName 2>&1
+  $null = netsh advfirewall firewall add rule `
+    name=$ruleName protocol=TCP dir=in localport=$port action=allow 2>&1
+  Write-Ok "Firewall rule '$ruleName' set for TCP port $port."
 }
 
 function Configure-AutoLogin($cfg, $shellPath) {
@@ -757,6 +767,7 @@ Run-Migrations
 Install-Service
 Apply-EdgePolicies
 Enable-RDP
+Open-KioskFirewall $cfg.Port
 $shellPath = Write-KioskShellScript $cfg.Port $cfg.LoginUser
 Disable-Sleep
 Register-BackupTask $cfg
